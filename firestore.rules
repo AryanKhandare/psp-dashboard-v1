@@ -1,0 +1,108 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isCorporateEmail() {
+      return request.auth.token.email.matches('^[a-zA-Z0-9._%+-]+@plasmaspray\\.co\\.in$') || request.auth.token.email == 'aryankhandare2005@gmail.com';
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    // Check if user is approved (active field is true)
+    function isApprovedUser() {
+      return isSignedIn() && isCorporateEmail() && getUserData().active == true;
+    }
+
+    function hasRole(role) {
+      return isApprovedUser() && getUserData().role == role;
+    }
+
+    function isAdmin() {
+      return isApprovedUser() && (getUserData().role in ['super_admin', 'production_admin', 'it_team']);
+    }
+
+    // Rules for Users
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isCorporateEmail();
+      // Allow users to update their own profile (e.g. to sync email verification status)
+      allow update: if (isSignedIn() && request.auth.uid == userId) || hasRole('super_admin') || hasRole('it_team');
+      allow delete: if hasRole('super_admin') || hasRole('it_team');
+    }
+
+    // Rules for Jobs
+    match /jobs/{jobId} {
+      allow read: if isApprovedUser();
+      // Allow super_admin/production_admin/it_team, quality_admin, or any approved user in the Inspection department to create/delete jobs
+      allow create, delete: if isAdmin() || hasRole('inspection_operator') || hasRole('quality_admin') || (isApprovedUser() && getUserData().department == 'Inspection');
+      allow update: if isApprovedUser() && !hasRole('hr_admin');
+
+      // Rules for Subcollections
+      match /process_history/{historyId} {
+        allow read: if isApprovedUser();
+        allow write: if isApprovedUser() && !hasRole('hr_admin');
+      }
+      
+      match /material_consumption/{consumptionId} {
+        allow read: if isApprovedUser();
+        allow write: if isApprovedUser() && !hasRole('hr_admin');
+      }
+    }
+
+    // Rules for Machines
+    match /machines/{machineId} {
+      allow read: if isApprovedUser();
+      allow write: if isAdmin();
+    }
+
+    // Rules for Master Materials
+    match /master_materials/{materialId} {
+      allow read: if isApprovedUser();
+      allow write: if isAdmin();
+    }
+
+    // Rules for Departments
+    match /departments/{departmentId} {
+      allow read: if isApprovedUser();
+      allow write: if isAdmin();
+    }
+
+    // Rules for Audit Logs
+    match /audit_logs/{logId} {
+      allow read: if isAdmin() || hasRole('quality_admin') || hasRole('hr_admin');
+      allow create: if isApprovedUser();
+      allow update, delete: if false; // Immutable audit log
+    }
+
+    // Rules for Analytics
+    match /dashboard_analytics/{document} {
+      allow read: if isApprovedUser();
+      allow write: if isAdmin();
+    }
+
+    // Rules for System Monitoring Telemetry
+    match /system_monitoring/{document} {
+      allow read: if isApprovedUser();
+      allow write: if isAdmin();
+    }
+
+    // Rules for Error Logs console
+    match /error_logs/{document} {
+      allow read: if isAdmin();
+      allow create: if isSignedIn();
+    }
+
+    // Rules for Notifications banner
+    match /notifications/{document} {
+      allow read: if isApprovedUser();
+      allow create: if isApprovedUser();
+    }
+  }
+}
