@@ -299,7 +299,8 @@
               status: "Pending",
               location: j.storeLocation || j.location || "",
               qtyHistory: j.qtyHistory || [],
-              splitRemark: j.splitRemark || ""
+              splitRemark: j.splitRemark || "",
+              jcNo: (window.parent && window.parent.getJobJcNo) ? window.parent.getJobJcNo(j) : (j.jcNo || "")
             }));
 
           return new Response(JSON.stringify(localSprayingJobs), {

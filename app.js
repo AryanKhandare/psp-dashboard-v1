@@ -171,7 +171,7 @@ let currentUser = null;
 let pendingSyncCount = 0;
 const materialSyncTimers = {};
 
-const scriptUrl = "https://script.google.com/macros/s/AKfycbyaeBzc9wNOuHcU0VLBrsTW8awIwoUXFWpld3jBzGpTdMs26ACyOft-3iAGTBh3M45aPA/exec";
+const scriptUrl = "https://script.google.com/macros/s/AKfycbw3vxqlFmsJr0HIpRjkgjIxNh-AdBgKuJnX5s0mfBAdaAwNlv-oRiecwlII0Hr4GvjdXg/exec";
 window.scriptUrl = scriptUrl;
 
 // Dynamic Google Sheet Master Data integration for Inspection Stage
@@ -280,7 +280,7 @@ async function fetchWithTimeout(resource, options = {}) {
 }
 
 // Configurable cache refresh interval: 10 minutes
-const INSPECTION_REFRESH_INTERVAL_MS = 600000;
+const INSPECTION_REFRESH_INTERVAL_MS = 120000; // Poll sheet mapping every 2 minutes
 let lastInspectionFetchTime = 0;
 
 // Inline worker script to parse and filter rows on a background thread
@@ -299,6 +299,7 @@ const parserWorkerCode = `
         const timestamp  = cols[6] ? String(cols[6].v || "").trim() : "";
         const actualVal  = cols[7] ? String(cols[7].v || "").trim() : "";
         const statusYVal = cols[8] ? String(cols[8].v || "").trim() : "";
+        const jcNo       = cols[9] ? String(cols[9].v || "").trim() : "";
 
         let assignedFirst = "", assignedSecond = "";
         if (assignedRaw) {
@@ -307,7 +308,7 @@ const parserWorkerCode = `
           assignedSecond = parts[1] || "";
         }
 
-        return { kpNo: kpVal, customer, partName, quantity, status, assignedFirst, assignedSecond, timestamp, actual: actualVal, statusY: statusYVal };
+        return { kpNo: kpVal, customer, partName, quantity, status, assignedFirst, assignedSecond, timestamp, actual: actualVal, statusY: statusYVal, jcNo };
       }).filter(r => r.kpNo && /^kp-/i.test(r.kpNo));
 
       let filtered = records;
@@ -376,6 +377,7 @@ async function parseRowsMainThreadAsync(rows, op, chunkSize = 200) {
         const timestamp  = cols[6] ? String(cols[6].v || "").trim() : "";
         const actualVal  = cols[7] ? String(cols[7].v || "").trim() : "";
         const statusYVal = cols[8] ? String(cols[8].v || "").trim() : "";
+        const jcNo       = cols[9] ? String(cols[9].v || "").trim() : "";
 
         let assignedFirst = "", assignedSecond = "";
         if (assignedRaw) {
@@ -393,7 +395,7 @@ async function parseRowsMainThreadAsync(rows, op, chunkSize = 200) {
             keep = (a1 === upperOp || a2 === upperOp);
           }
           if (keep) {
-            results.push({ kpNo: kpVal, customer, partName, quantity, status, assignedFirst, assignedSecond, timestamp, actual: actualVal, statusY: statusYVal });
+            results.push({ kpNo: kpVal, customer, partName, quantity, status, assignedFirst, assignedSecond, timestamp, actual: actualVal, statusY: statusYVal, jcNo });
           }
         }
       }
@@ -717,7 +719,7 @@ async function loadInspectionKPs(forceRefresh = false, isAutoRefresh = false) {
   try {
     // ─── Construct exact-matching SQL Query ───
     // Query column T (KP No), F (Customer), I (Part Name), L (Qty), C (Delivered Status), V (Assigned), A (Timestamp), X (Actual), Y (Status)
-    let query = "SELECT T, F, I, L, C, V, A, X, Y WHERE T IS NOT NULL AND (C IS NULL OR LOWER(C) != 'delivered')";
+    let query = "SELECT T, F, I, L, C, V, A, X, Y, S WHERE T IS NOT NULL AND (C IS NULL OR LOWER(C) != 'delivered')";
     if (op) {
       const lowerOp = op.trim().toLowerCase();
       query += ` AND (LOWER(V) = '${lowerOp}' OR LOWER(V) LIKE '${lowerOp} /%' OR LOWER(V) LIKE '%/ ${lowerOp}' OR LOWER(V) LIKE '%/ ${lowerOp} /%')`;
@@ -764,6 +766,27 @@ async function loadInspectionKPs(forceRefresh = false, isAutoRefresh = false) {
     _inspectionRetryCount = 0;
     
     console.log("[Inspection] ✅ Data loaded. Records count:", inspectionMasterRecords.length);
+    
+    // Build KP to JC map
+    window.kpToJcMap = {};
+    parsedRecords.forEach(r => {
+      if (r.kpNo && r.jcNo) {
+        window.kpToJcMap[r.kpNo.toUpperCase()] = r.jcNo;
+      }
+    });
+
+    // Also update any loaded jobs in memory
+    if (Array.isArray(window.jobs)) {
+      window.jobs.forEach(j => {
+        if (j.kpNumber) {
+          const mappedJc = window.kpToJcMap[j.kpNumber.toUpperCase()];
+          if (mappedJc) {
+            j.jcNo = mappedJc;
+          }
+        }
+      });
+    }
+
     populateInspectionDropdowns();
     hideInspectionLoading();
     hideInspectionError();
@@ -1860,8 +1883,12 @@ function startFirestoreListeners() {
           grinding: data.grinding || { status: "Pending", holdHistory: [] },
           polishing: data.polishing || { status: "Pending" },
           finalInspection: data.finalInspection || { status: "Pending" },
-          dispatch: data.dispatch || { status: "Pending" }
+          dispatch: data.dispatch || { status: "Pending" },
+          jcNo: data.jcNo || ""
         };
+        if (!job.jcNo && window.kpToJcMap && job.kpNumber && window.kpToJcMap[job.kpNumber.toUpperCase()]) {
+          job.jcNo = window.kpToJcMap[job.kpNumber.toUpperCase()];
+        }
         tempJobs.push(job);
       });
       
@@ -2122,8 +2149,12 @@ async function loadState() {
           grinding: j.grinding || { status: "Pending" },
           polishing: j.polishing || { status: "Pending" },
           finalInspection: j.finalInspection || { status: "Pending" },
-          dispatch: j.dispatch || { status: "Pending" }
+          dispatch: j.dispatch || { status: "Pending" },
+          jcNo: j.jcNo || j.jcNumber || j.jcno || ""
         };
+        if (!mapped.jcNo && window.kpToJcMap && mapped.kpNumber && window.kpToJcMap[mapped.kpNumber.toUpperCase()]) {
+          mapped.jcNo = window.kpToJcMap[mapped.kpNumber.toUpperCase()];
+        }
         
         mapped.masking = mapped.masking || { status: "Pending", materials: [], holdHistory: [] };
         if (mapped.currentDepartment === "Masking") {
@@ -2589,6 +2620,19 @@ async function createAuditLog(user, kpNumber, action) {
 }
 
 
+// Global KP to JC Number mapping
+window.kpToJcMap = window.kpToJcMap || {};
+
+function getJobJcNo(job) {
+  if (!job) return "";
+  if (job.jcNo) return job.jcNo;
+  const kp = job.kpNumber || job.kpNo || "";
+  if (!kp) return "";
+  const cleanKp = String(kp).trim().toUpperCase();
+  return window.kpToJcMap && window.kpToJcMap[cleanKp] ? window.kpToJcMap[cleanKp] : "";
+}
+window.getJobJcNo = getJobJcNo;
+
 // 5. TIME CONVERSION UTILITIES
 function formatDuration(ms) {
   if (ms === null || ms === undefined || isNaN(ms) || ms < 0) return "00:00:00";
@@ -2718,7 +2762,7 @@ function renderWorkflowOverview() {
     else statusBadge = `<span class="badge badge-normal">${job.status}</span>`;
 
     tr.innerHTML = `
-      <td class="font-mono font-bold text-cyan">${getCleanKpNumber(job.kpNumber)}</td>
+      <td class="font-mono font-bold text-cyan">${getCleanKpNumber(job.kpNumber)}${getJobJcNo(job) ? ` (${getJobJcNo(job)})` : ""}</td>
       <td>${job.partName}</td>
       <td>${job.customer}</td>
       <td class="font-mono">${renderQuantityWithHistory(job, true)}</td>
@@ -2792,7 +2836,7 @@ function renderInspectionDashboard() {
     inspectJobs.forEach(job => {
       const tr = document.createElement("tr");
       tr.innerHTML = `
-        <td class="font-mono font-bold text-cyan">${getCleanKpNumber(job.kpNumber)}</td>
+        <td class="font-mono font-bold text-cyan">${getCleanKpNumber(job.kpNumber)}${getJobJcNo(job) ? ` (${getJobJcNo(job)})` : ""}</td>
         <td>${job.partName}</td>
         <td>${job.customer}</td>
         <td class="font-mono">${renderQuantityWithHistory(job, true)}</td>
@@ -2893,7 +2937,7 @@ function renderAdminInspectionTracking() {
     }
     
     tr.innerHTML = `
-      <td class="font-mono font-bold text-cyan">${r.kpNo}</td>
+      <td class="font-mono font-bold text-cyan">${r.kpNo}${r.jcNo ? ` (${r.jcNo})` : ""}</td>
       <td>${r.customer}</td>
       <td>${r.partName}</td>
       <td class="font-mono">${r.quantity}</td>
@@ -3090,7 +3134,7 @@ function renderLiveJobQueue() {
 
     card.innerHTML = `
       <div class="job-card-header">
-        <span class="job-card-kp">${getCleanKpNumber(job.kpNumber)}</span>
+        <span class="job-card-kp">${getCleanKpNumber(job.kpNumber)}${getJobJcNo(job) ? ` (${getJobJcNo(job)})` : ""}</span>
         <span class="badge ${statusClass}">${job.masking.status}</span>
       </div>
       <div class="job-card-body">
@@ -3163,7 +3207,7 @@ function renderActiveJobTimer() {
   noJobMsg.style.display = "none";
   container.style.display = "flex";
 
-  document.getElementById("active-kp-no").textContent = getCleanKpNumber(job.kpNumber);
+  document.getElementById("active-kp-no").textContent = getCleanKpNumber(job.kpNumber) + (getJobJcNo(job) ? ` (${getJobJcNo(job)})` : "");
   document.getElementById("active-part-name").textContent = job.partName;
   document.getElementById("active-customer").textContent = job.customer;
   document.getElementById("active-qty").innerHTML = renderQuantityWithHistory(job);
@@ -3251,7 +3295,7 @@ function renderActiveJobCards() {
     card.innerHTML = `
       <div class="card-left">
         <div class="card-kp-row">
-          <span class="card-kp">${getCleanKpNumber(job.kpNumber)}</span>
+          <span class="card-kp">${getCleanKpNumber(job.kpNumber)}${getJobJcNo(job) ? ` (${getJobJcNo(job)})` : ""}</span>
           <span class="badge ${statusBadgeClass} text-xs">${job.masking.status}</span>
         </div>
         <span class="card-part">${job.partName} (${renderQuantityWithHistory(job)})</span>
@@ -3987,7 +4031,7 @@ function renderJobHistory() {
     const matCell = matStrings.length > 0 ? matStrings.join("<br>") : "None";
 
     tr.innerHTML = `
-      <td class="font-mono font-bold text-cyan">${job.kpNumber}</td>
+      <td class="font-mono font-bold text-cyan">${job.kpNumber}${getJobJcNo(job) ? ` (${getJobJcNo(job)})` : ""}</td>
       <td>${job.partName}</td>
       <td>${job.customer}</td>
       <td class="font-mono">${job.quantity}</td>
@@ -4831,7 +4875,7 @@ function renderGrindingLiveQueue() {
 
     card.innerHTML = `
       <div class="job-card-header">
-        <span class="job-card-kp">${getCleanKpNumber(job.kpNumber)}</span>
+        <span class="job-card-kp">${getCleanKpNumber(job.kpNumber)}${getJobJcNo(job) ? ` (${getJobJcNo(job)})` : ""}</span>
         <span class="badge ${statusClass}">${job.grinding.status}</span>
       </div>
       <div class="job-card-body">
@@ -4907,7 +4951,7 @@ function renderGrindingActiveJobTimer() {
   if (noJobMsg) noJobMsg.style.display = "none";
   if (container) container.style.display = "flex";
 
-  document.getElementById("grinding-active-kp-no").textContent = getCleanKpNumber(job.kpNumber);
+  document.getElementById("grinding-active-kp-no").textContent = getCleanKpNumber(job.kpNumber) + (getJobJcNo(job) ? ` (${getJobJcNo(job)})` : "");
   document.getElementById("grinding-active-part-name").textContent = job.partName;
   document.getElementById("grinding-active-customer").textContent = job.customer;
   document.getElementById("grinding-active-qty").innerHTML = renderQuantityWithHistory(job);
@@ -4994,7 +5038,7 @@ function renderGrindingActiveCards() {
     card.innerHTML = `
       <div class="card-left">
         <div class="card-kp-row">
-          <span class="card-kp">${getCleanKpNumber(job.kpNumber)}</span>
+          <span class="card-kp">${getCleanKpNumber(job.kpNumber)}${getJobJcNo(job) ? ` (${getJobJcNo(job)})` : ""}</span>
           <span class="badge ${statusBadgeClass} text-xs">${job.grinding.status}</span>
         </div>
         <span class="card-part">${job.partName} (${renderQuantityWithHistory(job)})</span>
@@ -5371,7 +5415,7 @@ function renderPolishingDashboard() {
   polishingJobs.forEach(job => {
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td class="font-mono font-bold text-cyan">${getCleanKpNumber(job.kpNumber)}</td>
+      <td class="font-mono font-bold text-cyan">${getCleanKpNumber(job.kpNumber)}${getJobJcNo(job) ? ` (${getJobJcNo(job)})` : ""}</td>
       <td>${job.partName}</td>
       <td>${job.customer}</td>
       <td class="font-mono">
@@ -5467,7 +5511,7 @@ function renderFinalInspectionDashboard() {
   finalJobs.forEach(job => {
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td class="font-mono font-bold text-cyan">${getCleanKpNumber(job.kpNumber)}</td>
+      <td class="font-mono font-bold text-cyan">${getCleanKpNumber(job.kpNumber)}${getJobJcNo(job) ? ` (${getJobJcNo(job)})` : ""}</td>
       <td>${job.partName}</td>
       <td>${job.customer}</td>
       <td class="font-mono">
@@ -5562,7 +5606,7 @@ function renderDispatchDashboard() {
   dispatchJobs.forEach(job => {
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td class="font-mono font-bold text-cyan">${getCleanKpNumber(job.kpNumber)}</td>
+      <td class="font-mono font-bold text-cyan">${getCleanKpNumber(job.kpNumber)}${getJobJcNo(job) ? ` (${getJobJcNo(job)})` : ""}</td>
       <td>${job.partName}</td>
       <td>${job.customer}</td>
       <td class="font-mono">
@@ -6434,7 +6478,7 @@ function renderDmdDashboard() {
         else if (j.status === "Hold") badgeClass = "badge-hold";
         
         tr.innerHTML = `
-          <td class="font-mono"><strong>${j.kpNumber}</strong></td>
+          <td class="font-mono"><strong>${j.kpNumber}${getJobJcNo(j) ? ` (${getJobJcNo(j)})` : ""}</strong></td>
           <td>
             <div>${j.partName}</div>
             <div class="text-xs text-muted" style="font-size:11px;">${j.customer} (Qty: ${j.quantity})</div>
@@ -6711,7 +6755,7 @@ function openCrudModal(entity, action) {
         <div class="form-group"><label>Store Location</label><input type="text" id="crud-job-store" class="form-input" placeholder="e.g. A10"></div>
       `;
     } else if (action === 'edit') {
-      let jobOptions = jobs.map(j => `<option value="${j.kpNumber}">${j.kpNumber} (${j.partName})</option>`).join("");
+      let jobOptions = jobs.map(j => `<option value="${j.kpNumber}">${j.kpNumber}${getJobJcNo(j) ? ` (${getJobJcNo(j)})` : ""} (${j.partName})</option>`).join("");
       fieldsHtml = `
         <div class="form-group"><label>Select Job to Edit *</label>
           <select id="crud-job-select" class="form-input" onchange="loadCrudJobDetails(this.value)">
@@ -6722,7 +6766,7 @@ function openCrudModal(entity, action) {
         <div id="crud-job-edit-details" class="hidden" style="display: flex; flex-direction: column; gap: 15px;"></div>
       `;
     } else if (action === 'delete') {
-      let jobOptions = jobs.map(j => `<option value="${j.kpNumber}">${j.kpNumber} (${j.partName})</option>`).join("");
+      let jobOptions = jobs.map(j => `<option value="${j.kpNumber}">${j.kpNumber}${getJobJcNo(j) ? ` (${getJobJcNo(j)})` : ""} (${j.partName})</option>`).join("");
       fieldsHtml = `
         <div class="form-group"><label>Select Job to Delete *</label>
           <select id="crud-job-select" class="form-input" required>

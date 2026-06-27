@@ -575,6 +575,7 @@ function getJobsHandler_(e) {
   const mappedJobs = jobsData.map(j => {
     let kpNumber = "";
     let partName = "";
+    let jcNo = "";
     let customer = "";
     let quantity = 1;
     let processType = "";
@@ -591,8 +592,10 @@ function getJobsHandler_(e) {
       const val = j[rawKey];
       if (cleanKey === "kpnumber" || cleanKey === "kpno" || cleanKey === "jobid" || cleanKey === "id") {
         kpNumber = String(val);
-      } else if (cleanKey === "partname" || cleanKey === "part" || cleanKey === "jcnumber" || cleanKey === "jcno") {
+      } else if (cleanKey === "partname" || cleanKey === "part") {
         partName = String(val);
+      } else if (cleanKey === "jcno" || cleanKey === "jcnumber" || cleanKey === "jcno.") {
+        jcNo = String(val);
       } else if (cleanKey === "customer" || cleanKey === "customername") {
         customer = String(val);
       } else if (cleanKey === "quantity" || cleanKey === "qty") {
@@ -619,6 +622,7 @@ function getJobsHandler_(e) {
     const jobObj = {
       kpNumber,
       partName,
+      jcNo,
       customer,
       quantity,
       processType,

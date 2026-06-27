@@ -105,7 +105,7 @@ export default function SprayBoothDashboard() {
 
             const resolvedQty = pendingQty !== "" ? pendingQty : importedQty;
 
-            return {
+             return {
               ...job,
               id: String(job.id || job.jobId || job.ID || "").trim(),
               fallbackId: `ROW-${index + 1}`,
@@ -122,7 +122,8 @@ export default function SprayBoothDashboard() {
                   ""
               ).trim(),
               part: String(job.part ?? job.Part ?? "").trim(),
-              qtyHistory: job.qtyHistory || []
+              qtyHistory: job.qtyHistory || [],
+              jcNo: String(job.jcNo || job.jcno || "").trim()
             };
           })
           .filter((job) => {
@@ -672,7 +673,7 @@ export default function SprayBoothDashboard() {
                   lineHeight: 1,
                 }}
               >
-                {getCleanKpNumber(job.id)}
+                {getCleanKpNumber(job.id)} {job.jcNo ? `(${job.jcNo})` : ""}
               </div>
  
               <div
@@ -820,7 +821,7 @@ export default function SprayBoothDashboard() {
                   lineHeight: 1,
                 }}
               >
-                {getCleanKpNumber(activeJob.id)}
+                {getCleanKpNumber(activeJob.id)} {activeJob.jcNo ? `(${activeJob.jcNo})` : ""}
               </div>
  
               <div
@@ -1199,7 +1200,7 @@ export default function SprayBoothDashboard() {
                           marginBottom: 12,
                         }}
                       >
-                        {getCleanKpNumber(job.id)}
+                        {getCleanKpNumber(job.id)} {job.jcNo ? `(${job.jcNo})` : ""}
                       </div>
  
                       <div
@@ -1346,7 +1347,7 @@ export default function SprayBoothDashboard() {
                         marginBottom: 10,
                       }}
                     >
-                      {getCleanKpNumber(job.id)}
+                      {getCleanKpNumber(job.id)} {job.jcNo ? `(${job.jcNo})` : ""}
                     </div>
 
                     <div

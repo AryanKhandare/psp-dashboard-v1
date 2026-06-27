@@ -267,7 +267,9 @@ function matchesField_(rawH, field) {
     case "kpnumber":
       return ["kpnumber", "kpno", "jobid", "id", "kp", "jobcardno", "jobcardnumber", "kpnum"].indexOf(h) !== -1;
     case "partname":
-      return ["partname", "part", "jcnumber", "jcno", "partdescription", "partname", "materialname", "material"].indexOf(h) !== -1;
+      return ["partname", "part", "partdescription", "partname", "materialname", "material"].indexOf(h) !== -1;
+    case "jcno":
+      return ["jcno", "jcnumber", "jcno."].indexOf(h) !== -1;
     case "customer":
       return ["customer", "customername"].indexOf(h) !== -1;
     case "quantity":
@@ -341,6 +343,7 @@ function getJobsHandler_(e) {
   const mappedJobs = jobsData.map(j => {
     let kpNumber = "";
     let partName = "";
+    let jcNo = "";
     let customer = "";
     let quantity = 1;
     let processType = "";
@@ -359,6 +362,8 @@ function getJobsHandler_(e) {
         kpNumber = String(val);
       } else if (matchesField_(cleanKey, "partname")) {
         partName = String(val);
+      } else if (matchesField_(cleanKey, "jcno")) {
+        jcNo = String(val);
       } else if (matchesField_(cleanKey, "customer")) {
         customer = String(val);
       } else if (matchesField_(cleanKey, "quantity")) {
@@ -385,6 +390,7 @@ function getJobsHandler_(e) {
     const jobObj = {
       kpNumber,
       partName,
+      jcNo,
       customer,
       quantity,
       processType,
