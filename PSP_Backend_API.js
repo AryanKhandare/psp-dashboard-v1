@@ -1172,7 +1172,7 @@ function fetchAndCacheInspectionMasterRecords_() {
   let kpCol = 20; // fallback T
   let custCol = 6; // fallback F
   let partCol = 9; // fallback I
-  let qtyCol = 12; // fallback L
+  let qtyCol = 10; // fallback J
   let statusCol = 3; // fallback C
   let assignedFirstCol = 22; // fallback V
   let timestampCol = 1; // fallback A

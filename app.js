@@ -721,7 +721,7 @@ async function loadInspectionKPs(forceRefresh = false, isAutoRefresh = false) {
   try {
     // ─── Construct exact-matching SQL Query ───
     // Query column T (KP No), F (Customer), I (Part Name), L (Qty), C (Delivered Status), V (Assigned), A (Timestamp), X (Actual), Y (Status)
-    let query = "SELECT T, F, I, L, C, V, A, X, Y, S, AM WHERE T IS NOT NULL AND (C IS NULL OR LOWER(C) != 'delivered')";
+    let query = "SELECT T, F, I, J, C, V, A, X, Y, S, AM WHERE T IS NOT NULL AND (C IS NULL OR LOWER(C) != 'delivered')";
     if (op) {
       const lowerOp = op.trim().toLowerCase();
       query += ` AND (LOWER(V) = '${lowerOp}' OR LOWER(V) LIKE '${lowerOp} /%' OR LOWER(V) LIKE '%/ ${lowerOp}' OR LOWER(V) LIKE '%/ ${lowerOp} /%')`;
