@@ -171,7 +171,7 @@ let currentUser = null;
 let pendingSyncCount = 0;
 const materialSyncTimers = {};
 
-const scriptUrl = "https://script.google.com/macros/s/AKfycbw3vxqlFmsJr0HIpRjkgjIxNh-AdBgKuJnX5s0mfBAdaAwNlv-oRiecwlII0Hr4GvjdXg/exec";
+const scriptUrl = "https://script.google.com/macros/s/AKfycbyXvEXmvfSD6Lc_gkTam1ln8Kgsd_OLtcJvsWkHITLV_SUBsh3xu6CFr_ZV8Qd1yQknQw/exec";
 window.scriptUrl = scriptUrl;
 
 // Dynamic Google Sheet Master Data integration for Inspection Stage
@@ -5556,9 +5556,26 @@ function renderFinalInspectionDashboard() {
   if (!tbody) return;
   tbody.innerHTML = "";
   
-  const finalJobs = jobs.filter(j => j.currentDepartment === "Final Inspection");
+  const filterKp = document.getElementById("final-filter-kp") ? document.getElementById("final-filter-kp").value.toLowerCase() : "";
+  const filterJc = document.getElementById("final-filter-jc") ? document.getElementById("final-filter-jc").value.toLowerCase() : "";
+  const filterCust = document.getElementById("final-filter-customer") ? document.getElementById("final-filter-customer").value.toLowerCase() : "";
+  const filterProc = document.getElementById("final-filter-process") ? document.getElementById("final-filter-process").value : "";
+  const filterStat = document.getElementById("final-filter-status") ? document.getElementById("final-filter-status").value : "";
+
+  const finalJobs = jobs.filter(j => {
+    if (j.currentDepartment !== "Final Inspection") return false;
+    
+    if (filterKp && !j.kpNumber.toLowerCase().includes(filterKp)) return false;
+    if (filterJc && !getJobJcNo(j).toLowerCase().includes(filterJc)) return false;
+    if (filterCust && !j.customer.toLowerCase().includes(filterCust)) return false;
+    if (filterProc && j.processType !== filterProc) return false;
+    if (filterStat && (j.finalInspection?.status || "Pending") !== filterStat) return false;
+    
+    return true;
+  });
+
   if (finalJobs.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted">No components in final inspection queue.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted">No components in final inspection queue matching the filters.</td></tr>`;
     return;
   }
   
@@ -5566,6 +5583,18 @@ function renderFinalInspectionDashboard() {
   
   finalJobs.forEach(job => {
     const tr = document.createElement("tr");
+    
+    let statusClass = "badge-pending";
+    let statusText = "QA Review Pending";
+    const fStatus = job.finalInspection?.status || "Pending";
+    if (fStatus === "In Progress") {
+      statusClass = "badge-progress";
+      statusText = "QA Review In Progress";
+    } else if (fStatus === "Hold") {
+      statusClass = "badge-hold";
+      statusText = "QA Review On Hold";
+    }
+
     tr.innerHTML = `
       <td class="font-mono font-bold text-cyan">${getCleanKpNumber(job.kpNumber)}${getJobJcNo(job) ? ` (${getJobJcNo(job)})` : ""}</td>
       <td>${job.partName}</td>
@@ -5574,7 +5603,7 @@ function renderFinalInspectionDashboard() {
         ${renderQuantityWithHistory(job, true)}
         ${job.splitRemark ? `<div class="split-remark text-orange" style="color: #f97316 !important; font-size: 11px; margin-top: 4px;">${job.splitRemark}</div>` : ""}
       </td>
-      <td><span class="badge badge-pending">QA Review Pending</span></td>
+      <td><span class="badge ${statusClass}">${statusText}</span></td>
       <td>${job.priority}</td>
       <td>
         <select id="final-inspection-next-stage-${job.kpNumber}" class="form-input select-sm" style="display:inline-block; width:auto; margin-right:5px; height:30px; padding:2px 5px; font-size:12px;" ${isReadOnly ? 'disabled style="display:none;"' : ''}>
@@ -6088,6 +6117,33 @@ function setupEventListeners() {
     document.getElementById("hist-filter-process").value = "";
     renderJobHistory();
   });
+
+  // Final Inspection Filters listeners
+  if (document.getElementById("final-filter-kp")) {
+    document.getElementById("final-filter-kp").addEventListener("input", renderFinalInspectionDashboard);
+  }
+  if (document.getElementById("final-filter-jc")) {
+    document.getElementById("final-filter-jc").addEventListener("input", renderFinalInspectionDashboard);
+  }
+  if (document.getElementById("final-filter-customer")) {
+    document.getElementById("final-filter-customer").addEventListener("input", renderFinalInspectionDashboard);
+  }
+  if (document.getElementById("final-filter-process")) {
+    document.getElementById("final-filter-process").addEventListener("change", renderFinalInspectionDashboard);
+  }
+  if (document.getElementById("final-filter-status")) {
+    document.getElementById("final-filter-status").addEventListener("change", renderFinalInspectionDashboard);
+  }
+  if (document.getElementById("btn-clear-final-filters")) {
+    document.getElementById("btn-clear-final-filters").addEventListener("click", () => {
+      document.getElementById("final-filter-kp").value = "";
+      document.getElementById("final-filter-jc").value = "";
+      document.getElementById("final-filter-customer").value = "";
+      document.getElementById("final-filter-process").value = "";
+      document.getElementById("final-filter-status").value = "";
+      renderFinalInspectionDashboard();
+    });
+  }
 
   // Dynamic Inspection Google Sheet Listeners
   document.getElementById("inspect-kp-no").addEventListener("change", () => {

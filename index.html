@@ -1323,6 +1323,41 @@
             <h3>COMPONENTS IN FINAL INSPECTION QUEUE</h3>
           </div>
           <div class="panel-body">
+            
+            <!-- Filters Toolbar -->
+            <div class="filters-toolbar" style="margin-bottom: 20px;">
+              <div class="filter-group">
+                <label for="final-filter-kp">KP No:</label>
+                <input type="text" id="final-filter-kp" class="form-input input-sm" placeholder="Search KP...">
+              </div>
+              <div class="filter-group">
+                <label for="final-filter-jc">JC No:</label>
+                <input type="text" id="final-filter-jc" class="form-input input-sm" placeholder="Search JC...">
+              </div>
+              <div class="filter-group">
+                <label for="final-filter-customer">Customer:</label>
+                <input type="text" id="final-filter-customer" class="form-input input-sm" placeholder="Search Customer...">
+              </div>
+              <div class="filter-group">
+                <label for="final-filter-process">Process:</label>
+                <select id="final-filter-process" class="form-input select-sm">
+                  <option value="">All Processes</option>
+                  <option value="Plasma">Plasma</option>
+                  <option value="HCOS">HCOS</option>
+                </select>
+              </div>
+              <div class="filter-group">
+                <label for="final-filter-status">Status:</label>
+                <select id="final-filter-status" class="form-input select-sm">
+                  <option value="">All Statuses</option>
+                  <option value="Pending">Pending</option>
+                  <option value="In Progress">In Progress</option>
+                  <option value="Hold">Hold</option>
+                </select>
+              </div>
+              <button class="btn btn-secondary btn-sm btn-tablet-sm" id="btn-clear-final-filters" style="height:32px; font-size:11px; display:flex; align-items:center; justify-content:center; white-space:nowrap;">CLEAR FILTERS</button>
+            </div>
+
             <table class="data-table">
               <thead>
                 <tr>
