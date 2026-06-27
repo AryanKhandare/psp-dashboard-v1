@@ -290,13 +290,13 @@ const parserWorkerCode = `
     try {
       const records = rows.map(row => {
         const cols = row.c || [];
-        const kpVal      = cols[0] ? String(cols[0].v || "").trim() : "";
-        const customer   = cols[1] ? String(cols[1].v || "").trim() : "";
-        const partName   = cols[2] ? String(cols[2].v || "").trim() : "";
-        const quantity   = cols[3] ? String(cols[3].v || "").trim() : "";
-        const status     = cols[4] ? String(cols[4].v || "").trim() : "";
-        const assignedRaw= cols[5] ? String(cols[5].v || "").trim() : "";
-        const timestamp  = cols[6] ? String(cols[6].v || "").trim() : "";
+        const kpVal      = cols[0] ? String(cols[0].v ?? "").trim() : "";
+        const customer   = cols[1] ? String(cols[1].v ?? "").trim() : "";
+        const partName   = cols[2] ? String(cols[2].v ?? "").trim() : "";
+        const quantity   = cols[3] ? String(cols[3].v ?? "").trim() : "";
+        const status     = cols[4] ? String(cols[4].v ?? "").trim() : "";
+        const assignedRaw= cols[5] ? String(cols[5].v ?? "").trim() : "";
+        const timestamp  = cols[6] ? String(cols[6].v ?? "").trim() : "";
         const actualVal  = cols[7] ? String(cols[7].v || "").trim() : "";
         const statusYVal = cols[8] ? String(cols[8].v || "").trim() : "";
         const jcNo       = cols[9] ? String(cols[9].v || "").trim() : "";
@@ -369,13 +369,13 @@ async function parseRowsMainThreadAsync(rows, op, chunkSize = 200) {
       for (; index < end; index++) {
         const row = rows[index];
         const cols = row.c || [];
-        const kpVal      = cols[0] ? String(cols[0].v || "").trim() : "";
-        const customer   = cols[1] ? String(cols[1].v || "").trim() : "";
-        const partName   = cols[2] ? String(cols[2].v || "").trim() : "";
-        const quantity   = cols[3] ? String(cols[3].v || "").trim() : "";
-        const status     = cols[4] ? String(cols[4].v || "").trim() : "";
-        const assignedRaw= cols[5] ? String(cols[5].v || "").trim() : "";
-        const timestamp  = cols[6] ? String(cols[6].v || "").trim() : "";
+        const kpVal      = cols[0] ? String(cols[0].v ?? "").trim() : "";
+        const customer   = cols[1] ? String(cols[1].v ?? "").trim() : "";
+        const partName   = cols[2] ? String(cols[2].v ?? "").trim() : "";
+        const quantity   = cols[3] ? String(cols[3].v ?? "").trim() : "";
+        const status     = cols[4] ? String(cols[4].v ?? "").trim() : "";
+        const assignedRaw= cols[5] ? String(cols[5].v ?? "").trim() : "";
+        const timestamp  = cols[6] ? String(cols[6].v ?? "").trim() : "";
         const actualVal  = cols[7] ? String(cols[7].v || "").trim() : "";
         const statusYVal = cols[8] ? String(cols[8].v || "").trim() : "";
         const jcNo       = cols[9] ? String(cols[9].v || "").trim() : "";
@@ -840,6 +840,46 @@ async function autoSyncJobsFromSpreadsheet(records) {
     const existingJob = jobs.find(j => j.kpNumber.toLowerCase() === kpNo.toLowerCase());
     
     if (existingJob) {
+      // Sync quantity and metadata if they differ from spreadsheet
+      let fieldsChanged = false;
+      const updates = {};
+      const newQty = Number(record.quantity) || 1;
+
+      if (newQty !== existingJob.quantity) {
+        console.log(`[Auto-Sync] Job ${kpNo} quantity mismatch: local=${existingJob.quantity}, sheet=${newQty}. Updating...`);
+        existingJob.quantity = newQty;
+        updates.quantity = newQty;
+        fieldsChanged = true;
+      }
+      if (record.partName && record.partName !== existingJob.partName) {
+        existingJob.partName = record.partName;
+        updates.partName = record.partName;
+        fieldsChanged = true;
+      }
+      if (record.customer && record.customer !== existingJob.customer) {
+        existingJob.customer = record.customer;
+        updates.customer = record.customer;
+        fieldsChanged = true;
+      }
+
+      if (fieldsChanged) {
+        renderAll();
+        if (!isMockMode()) {
+          const db = firebase.firestore();
+          db.collection("jobs").where("kpNumber", "==", kpNo).get().then(snap => {
+            if (!snap.empty) {
+              snap.docs[0].ref.update(updates).then(() => {
+                console.log(`[Auto-Sync] Job ${kpNo} fields updated in Firestore.`);
+              }).catch(err => {
+                console.error(`[Auto-Sync] Failed to update fields in Firestore for ${kpNo}:`, err);
+              });
+            }
+          });
+        } else {
+          saveState();
+        }
+      }
+
       // Sync only if job is currently in either Inspection or Masking stage, or target stage is Final Inspection
       if (existingJob.currentDepartment === "Inspection" || existingJob.currentDepartment === "Masking" || targetDept === "Final Inspection") {
         if (existingJob.currentDepartment !== targetDept) {
