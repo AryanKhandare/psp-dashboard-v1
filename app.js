@@ -300,6 +300,7 @@ const parserWorkerCode = `
         const actualVal  = cols[7] ? String(cols[7].v || "").trim() : "";
         const statusYVal = cols[8] ? String(cols[8].v || "").trim() : "";
         const jcNo       = cols[9] ? String(cols[9].v || "").trim() : "";
+        const firStVal   = cols[10] ? String(cols[10].v || "").trim() : "";
 
         let assignedFirst = "", assignedSecond = "";
         if (assignedRaw) {
@@ -308,7 +309,7 @@ const parserWorkerCode = `
           assignedSecond = parts[1] || "";
         }
 
-        return { kpNo: kpVal, customer, partName, quantity, status, assignedFirst, assignedSecond, timestamp, actual: actualVal, statusY: statusYVal, jcNo };
+        return { kpNo: kpVal, customer, partName, quantity, status, assignedFirst, assignedSecond, timestamp, actual: actualVal, statusY: statusYVal, jcNo, firSt: firStVal };
       }).filter(r => r.kpNo && /^kp-/i.test(r.kpNo));
 
       let filtered = records;
@@ -378,6 +379,7 @@ async function parseRowsMainThreadAsync(rows, op, chunkSize = 200) {
         const actualVal  = cols[7] ? String(cols[7].v || "").trim() : "";
         const statusYVal = cols[8] ? String(cols[8].v || "").trim() : "";
         const jcNo       = cols[9] ? String(cols[9].v || "").trim() : "";
+        const firStVal   = cols[10] ? String(cols[10].v || "").trim() : "";
 
         let assignedFirst = "", assignedSecond = "";
         if (assignedRaw) {
@@ -395,7 +397,7 @@ async function parseRowsMainThreadAsync(rows, op, chunkSize = 200) {
             keep = (a1 === upperOp || a2 === upperOp);
           }
           if (keep) {
-            results.push({ kpNo: kpVal, customer, partName, quantity, status, assignedFirst, assignedSecond, timestamp, actual: actualVal, statusY: statusYVal, jcNo });
+            results.push({ kpNo: kpVal, customer, partName, quantity, status, assignedFirst, assignedSecond, timestamp, actual: actualVal, statusY: statusYVal, jcNo, firSt: firStVal });
           }
         }
       }
@@ -481,7 +483,7 @@ async function fetchGVizData(queryString) {
       }
     };
     
-    const url = `https://docs.google.com/spreadsheets/d/1ip55xEk5rtdqqhCeJ8Hx0IT6aBfnO_0eFIEKh3a7cYg/gviz/tq?sheet=FMS&range=A5:Z3500&tqx=out:json;responseHandler:${callbackName}&tq=${encodeURIComponent(queryString)}`;
+    const url = `https://docs.google.com/spreadsheets/d/1ip55xEk5rtdqqhCeJ8Hx0IT6aBfnO_0eFIEKh3a7cYg/gviz/tq?sheet=FMS&range=A5:AZ3500&tqx=out:json;responseHandler:${callbackName}&tq=${encodeURIComponent(queryString)}`;
     script = document.createElement('script');
     script.src = url;
     script.onerror = () => {
@@ -719,7 +721,7 @@ async function loadInspectionKPs(forceRefresh = false, isAutoRefresh = false) {
   try {
     // ─── Construct exact-matching SQL Query ───
     // Query column T (KP No), F (Customer), I (Part Name), L (Qty), C (Delivered Status), V (Assigned), A (Timestamp), X (Actual), Y (Status)
-    let query = "SELECT T, F, I, L, C, V, A, X, Y, S WHERE T IS NOT NULL AND (C IS NULL OR LOWER(C) != 'delivered')";
+    let query = "SELECT T, F, I, L, C, V, A, X, Y, S, AM WHERE T IS NOT NULL AND (C IS NULL OR LOWER(C) != 'delivered')";
     if (op) {
       const lowerOp = op.trim().toLowerCase();
       query += ` AND (LOWER(V) = '${lowerOp}' OR LOWER(V) LIKE '${lowerOp} /%' OR LOWER(V) LIKE '%/ ${lowerOp}' OR LOWER(V) LIKE '%/ ${lowerOp} /%')`;
@@ -817,20 +819,29 @@ async function autoSyncJobsFromSpreadsheet(records) {
     // Determine target stage:
     // If Column X (Actual) is empty OR Column Y (Status) is empty (or not "done" case-insensitive), it should be in Inspection.
     // If Column X (Actual) is NOT empty AND Column Y (Status) is "done", it should be in Masking.
-    const actualEmpty = !record.actual || record.actual.trim() === "";
+    // Determine target stage:
+    // If Column Y (Status) is NOT "done", target department is "Inspection".
+    // If Column Y (Status) is "done":
+    //   If Column AM (FIR ST) is NOT "done", target department is "Masking".
+    //   If Column AM (FIR ST) is "done" (both are done), target department is "Final Inspection".
     const statusYDone = record.statusY && record.statusY.trim().toLowerCase() === "done";
+    const firStDone = record.firSt && record.firSt.trim().toLowerCase() === "done";
     
     let targetDept = "Inspection";
-    if (!actualEmpty && statusYDone) {
-      targetDept = "Masking";
+    if (statusYDone) {
+      if (firStDone) {
+        targetDept = "Final Inspection";
+      } else {
+        targetDept = "Masking";
+      }
     }
     
     // Check if the job already exists in local list
     const existingJob = jobs.find(j => j.kpNumber.toLowerCase() === kpNo.toLowerCase());
     
     if (existingJob) {
-      // Sync only if job is currently in either Inspection or Masking stage
-      if (existingJob.currentDepartment === "Inspection" || existingJob.currentDepartment === "Masking") {
+      // Sync only if job is currently in either Inspection or Masking stage, or target stage is Final Inspection
+      if (existingJob.currentDepartment === "Inspection" || existingJob.currentDepartment === "Masking" || targetDept === "Final Inspection") {
         if (existingJob.currentDepartment !== targetDept) {
           if (window.autoImportedKPs.has(kpNo.toLowerCase())) {
             continue;
@@ -854,6 +865,9 @@ async function autoSyncJobsFromSpreadsheet(records) {
                 { name: "High Temperature Putty", type: "Sealant", batch: "HTP-9921", unit: "Gram", plannedQty: 350, actualQty: 0 }
               ];
             }
+          } else if (targetDept === "Final Inspection") {
+            existingJob.finalInspection = existingJob.finalInspection || {};
+            existingJob.finalInspection.status = "Pending";
           } else {
             existingJob.masking = existingJob.masking || {};
             existingJob.masking.status = "Pending";
@@ -3088,6 +3102,7 @@ function renderLiveJobQueue() {
 
   // Get active queue filters
   const filterKp = document.getElementById("filter-kp").value.toLowerCase();
+  const filterJc = document.getElementById("filter-jc") ? document.getElementById("filter-jc").value.toLowerCase() : "";
   const filterCust = document.getElementById("filter-customer").value.toLowerCase();
   const filterProc = document.getElementById("filter-process").value;
   const filterStat = document.getElementById("filter-status").value;
@@ -3098,6 +3113,7 @@ function renderLiveJobQueue() {
     
     // Apply filters
     if (filterKp && !j.kpNumber.toLowerCase().includes(filterKp)) return false;
+    if (filterJc && !getJobJcNo(j).toLowerCase().includes(filterJc)) return false;
     if (filterCust && !j.customer.toLowerCase().includes(filterCust)) return false;
     if (filterProc && j.processType !== filterProc) return false;
     if (filterStat && j.masking.status !== filterStat) return false;
@@ -6003,11 +6019,17 @@ function setupEventListeners() {
 
   // Filters Queue listeners
   document.getElementById("filter-kp").addEventListener("input", renderLiveJobQueue);
+  if (document.getElementById("filter-jc")) {
+    document.getElementById("filter-jc").addEventListener("input", renderLiveJobQueue);
+  }
   document.getElementById("filter-customer").addEventListener("input", renderLiveJobQueue);
   document.getElementById("filter-process").addEventListener("change", renderLiveJobQueue);
   document.getElementById("filter-status").addEventListener("change", renderLiveJobQueue);
   document.getElementById("btn-clear-filters").addEventListener("click", () => {
     document.getElementById("filter-kp").value = "";
+    if (document.getElementById("filter-jc")) {
+      document.getElementById("filter-jc").value = "";
+    }
     document.getElementById("filter-customer").value = "";
     document.getElementById("filter-process").value = "";
     document.getElementById("filter-status").value = "";
