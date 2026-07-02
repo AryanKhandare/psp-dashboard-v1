@@ -6737,7 +6737,7 @@ function renderUserRows(users) {
   tbody.innerHTML = "";
   
   if (users.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="6" class="text-center text-muted">No registered users in system.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted">No registered users in system.</td></tr>`;
     return;
   }
   
@@ -6798,6 +6798,7 @@ function renderUserRows(users) {
         <div class="text-xs text-muted" style="font-size:11px; margin-top:2px;">${user.email}</div>
       </td>
       <td><span class="badge ${verifiedBadge}">${isVerified}</span></td>
+      <td style="font-family: monospace; font-weight: bold; letter-spacing: 1px;">${user.pin || "N/A"}</td>
       <td>${roleSelectHtml}</td>
       <td>${deptSelectHtml}</td>
       <td><span class="badge ${badgeClass}">${statusText}</span></td>
@@ -7274,11 +7275,11 @@ function setupEventListeners() {
       const department = document.getElementById("user-dept").value;
       
       if (password !== confirmPass) {
-        alert("Passwords do not match.");
+        alert("Security PINs do not match.");
         return;
       }
-      if (password.length < 6) {
-        alert("Password must be at least 6 characters.");
+      if (!/^[0-9]{6}$/.test(password)) {
+        alert("Security PIN must be exactly 6 digits.");
         return;
       }
       
@@ -7305,13 +7306,13 @@ function setupEventListeners() {
         return;
       }
       
-      const newUid = `uid-${Math.floor(100000 + Math.random() * 900000)}`;
       const newUser = {
         uid: newUid,
         email,
         role,
         department: role === 'super_admin' ? 'All' : department,
-        active: true
+        active: true,
+        pin: password
       };
       
       MOCK_DB.addUser(newUser, password);
@@ -7326,6 +7327,7 @@ function setupEventListeners() {
             role,
             department: newUser.department,
             active: true,
+            pin: password,
             createdAt: new Date().toISOString()
           });
         } catch (err) {

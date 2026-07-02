@@ -45,42 +45,43 @@ const MOCK_DB = {
   init() {
     if (!localStorage.getItem('mock_db_users') || 
         !localStorage.getItem('mock_db_users').includes("gt@plasmaspray.co.in") || 
-        localStorage.getItem('mock_db_users').includes('"email":"vg@plasmaspray.co.in","role":"operator"')) {
+        localStorage.getItem('mock_db_users').includes('"email":"vg@plasmaspray.co.in","role":"operator"') ||
+        !localStorage.getItem('mock_db_users').includes('"pin":')) {
       const seedUsers = [
-        { uid: "uid-super-admin", email: "admin@plasmaspray.co.in", role: "super_admin", department: "All", active: true, emailVerified: true },
-        { uid: "uid-production-admin", email: "production@plasmaspray.co.in", role: "production_admin", department: "All", active: true, emailVerified: true },
-        { uid: "uid-hr-admin", email: "hr@plasmaspray.co.in", role: "hr_admin", department: "All", active: true, emailVerified: true },
-        { uid: "uid-quality-admin", email: "quality@plasmaspray.co.in", role: "quality_admin", department: "All", active: true, emailVerified: true },
-        { uid: "uid-masking-operator", email: "masking@plasmaspray.co.in", role: "operator", department: "Masking", active: true, emailVerified: true },
-        { uid: "uid-spraying-operator", email: "spraying@plasmaspray.co.in", role: "operator", department: "Spraying", active: true, emailVerified: true },
-        { uid: "uid-grinding-operator", email: "grinding@plasmaspray.co.in", role: "operator", department: "Grinding", active: true, emailVerified: true },
-        { uid: "uid-polishing-operator", email: "polishing@plasmaspray.co.in", role: "operator", department: "Polishing", active: true, emailVerified: true },
-        { uid: "uid-gt-operator", email: "gt@plasmaspray.co.in", role: "quality_admin", department: "Inspection", active: true, emailVerified: true },
-        { uid: "uid-vg-operator", email: "vg@plasmaspray.co.in", role: "quality_admin", department: "Inspection", active: true, emailVerified: true },
-        { uid: "uid-mf-operator", email: "mf@plasmaspray.co.in", role: "quality_admin", department: "Inspection", active: true, emailVerified: true },
-        { uid: "uid-sj-operator", email: "sj@plasmaspray.co.in", role: "quality_admin", department: "Inspection", active: true, emailVerified: true },
-        { uid: "uid-jn-operator", email: "jn@plasmaspray.co.in", role: "quality_admin", department: "Inspection", active: true, emailVerified: true },
-        { uid: "uid-laxmi-operator", email: "laxmi@plasmaspray.co.in", role: "quality_admin", department: "Inspection", active: true, emailVerified: true },
-        { uid: "uid-suspended", email: "inactive@plasmaspray.co.in", role: "operator", department: "Masking", active: false, emailVerified: true }
+        { uid: "uid-super-admin", email: "admin@plasmaspray.co.in", role: "super_admin", department: "All", active: true, emailVerified: true, pin: "111111" },
+        { uid: "uid-production-admin", email: "production@plasmaspray.co.in", role: "production_admin", department: "All", active: true, emailVerified: true, pin: "222222" },
+        { uid: "uid-hr-admin", email: "hr@plasmaspray.co.in", role: "hr_admin", department: "All", active: true, emailVerified: true, pin: "333333" },
+        { uid: "uid-quality-admin", email: "quality@plasmaspray.co.in", role: "quality_admin", department: "All", active: true, emailVerified: true, pin: "444444" },
+        { uid: "uid-masking-operator", email: "masking@plasmaspray.co.in", role: "operator", department: "Masking", active: true, emailVerified: true, pin: "555555" },
+        { uid: "uid-spraying-operator", email: "spraying@plasmaspray.co.in", role: "operator", department: "Spraying", active: true, emailVerified: true, pin: "666666" },
+        { uid: "uid-grinding-operator", email: "grinding@plasmaspray.co.in", role: "operator", department: "Grinding", active: true, emailVerified: true, pin: "777777" },
+        { uid: "uid-polishing-operator", email: "polishing@plasmaspray.co.in", role: "operator", department: "Polishing", active: true, emailVerified: true, pin: "888888" },
+        { uid: "uid-gt-operator", email: "gt@plasmaspray.co.in", role: "quality_admin", department: "Inspection", active: true, emailVerified: true, pin: "123456" },
+        { uid: "uid-vg-operator", email: "vg@plasmaspray.co.in", role: "quality_admin", department: "Inspection", active: true, emailVerified: true, pin: "123456" },
+        { uid: "uid-mf-operator", email: "mf@plasmaspray.co.in", role: "quality_admin", department: "Inspection", active: true, emailVerified: true, pin: "123456" },
+        { uid: "uid-sj-operator", email: "sj@plasmaspray.co.in", role: "quality_admin", department: "Inspection", active: true, emailVerified: true, pin: "123456" },
+        { uid: "uid-jn-operator", email: "jn@plasmaspray.co.in", role: "quality_admin", department: "Inspection", active: true, emailVerified: true, pin: "123456" },
+        { uid: "uid-laxmi-operator", email: "laxmi@plasmaspray.co.in", role: "quality_admin", department: "Inspection", active: true, emailVerified: true, pin: "123456" },
+        { uid: "uid-suspended", email: "inactive@plasmaspray.co.in", role: "operator", department: "Masking", active: false, emailVerified: true, pin: "123456" }
       ];
       localStorage.setItem('mock_db_users', JSON.stringify(seedUsers));
       
       const seedPasswords = {
-        "admin@plasmaspray.co.in": "admin123",
-        "production@plasmaspray.co.in": "prod123",
-        "hr@plasmaspray.co.in": "hr123",
-        "quality@plasmaspray.co.in": "quality123",
-        "masking@plasmaspray.co.in": "mask123",
-        "spraying@plasmaspray.co.in": "spray123",
-        "grinding@plasmaspray.co.in": "grind123",
-        "polishing@plasmaspray.co.in": "polish123",
-        "gt@plasmaspray.co.in": "gt123",
-        "vg@plasmaspray.co.in": "vg123",
-        "mf@plasmaspray.co.in": "mf123",
-        "sj@plasmaspray.co.in": "sj123",
-        "jn@plasmaspray.co.in": "jn123",
-        "laxmi@plasmaspray.co.in": "laxmi123",
-        "inactive@plasmaspray.co.in": "inactive123"
+        "admin@plasmaspray.co.in": "111111",
+        "production@plasmaspray.co.in": "222222",
+        "hr@plasmaspray.co.in": "333333",
+        "quality@plasmaspray.co.in": "444444",
+        "masking@plasmaspray.co.in": "555555",
+        "spraying@plasmaspray.co.in": "666666",
+        "grinding@plasmaspray.co.in": "777777",
+        "polishing@plasmaspray.co.in": "888888",
+        "gt@plasmaspray.co.in": "123456",
+        "vg@plasmaspray.co.in": "123456",
+        "mf@plasmaspray.co.in": "123456",
+        "sj@plasmaspray.co.in": "123456",
+        "jn@plasmaspray.co.in": "123456",
+        "laxmi@plasmaspray.co.in": "123456",
+        "inactive@plasmaspray.co.in": "123456"
       };
       localStorage.setItem('mock_db_passwords', JSON.stringify(seedPasswords));
     }
@@ -217,6 +218,14 @@ function logLocalAuthAction(userEmail, action, role, dept) {
   }
 }
 
+async function hashPin(email, pin) {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(email.toLowerCase().trim() + "_" + pin + "_psp_salt_2026");
+  const hashBuffer = await window.crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
 async function handleAuthAction(email, password, confirmPassword, role, department, fullname) {
   showLoginAlert(""); // Clear alert
   
@@ -231,6 +240,12 @@ async function handleAuthAction(email, password, confirmPassword, role, departme
     return;
   }
 
+  // ===== PIN VALIDATION =====
+  if (!password || !/^[0-9]{6}$/.test(password)) {
+    showToast("Validation Error", "Security PIN must be exactly 6 digits.", "danger");
+    return;
+  }
+
   // Validate signup constraints
   if (state.mode === 'signup') {
     if (!fullname || fullname.trim() === "") {
@@ -238,11 +253,7 @@ async function handleAuthAction(email, password, confirmPassword, role, departme
       return;
     }
     if (password !== confirmPassword) {
-      showToast("Validation Error", "Passwords do not match. Please verify.", "danger");
-      return;
-    }
-    if (password.length < 6) {
-      showToast("Validation Error", "Password must be at least 6 characters long.", "danger");
+      showToast("Validation Error", "Security PINs do not match. Please verify.", "danger");
       return;
     }
   }
@@ -261,7 +272,7 @@ async function handleAuthAction(email, password, confirmPassword, role, departme
         const user = users.find(u => u.email.toLowerCase() === email.toLowerCase());
         
         if (!user || passwords[email] !== password) {
-          showErrorState("Invalid credentials. Try admin@plasmaspray.co.in / admin123");
+          showErrorState("Invalid credentials. Try admin@plasmaspray.co.in / 111111");
           return;
         }
 
@@ -321,6 +332,7 @@ async function handleAuthAction(email, password, confirmPassword, role, departme
           department: "pending",
           active: false,
           emailVerified: false,
+          pin: password, // Store plaintext PIN
           createdAt: new Date().toISOString()
         };
 
@@ -344,7 +356,8 @@ async function handleAuthAction(email, password, confirmPassword, role, departme
       
       if (state.mode === 'login') {
         statusText.textContent = "Connecting to Authentication server...";
-        const userCredential = await firebase.auth().signInWithEmailAndPassword(email, password);
+        const firebasePassword = await hashPin(email, password);
+        const userCredential = await firebase.auth().signInWithEmailAndPassword(email, firebasePassword);
         const user = userCredential.user;
 
         // ===== DOMAIN CHECK after Firebase auth =====
@@ -370,6 +383,7 @@ async function handleAuthAction(email, password, confirmPassword, role, departme
               department: "pending",
               active: false,
               emailVerified: user.emailVerified,
+              pin: password, // Store raw PIN
               createdAt: firebase.firestore.FieldValue.serverTimestamp()
             };
             await db.collection("users").doc(user.uid).set(defaultProfile);
@@ -380,6 +394,11 @@ async function handleAuthAction(email, password, confirmPassword, role, departme
             if (user.emailVerified && !userProfile.emailVerified) {
               await db.collection("users").doc(user.uid).update({ emailVerified: true });
               userProfile.emailVerified = true;
+            }
+            // Ensure raw PIN is updated in Firestore user profile if missing
+            if (!userProfile.pin) {
+              await db.collection("users").doc(user.uid).update({ pin: password });
+              userProfile.pin = password;
             }
           }
         } catch (firestoreErr) {
@@ -429,7 +448,8 @@ async function handleAuthAction(email, password, confirmPassword, role, departme
       } else {
         // Live Firebase Sign Up
         statusText.textContent = "Creating authentication account...";
-        const userCredential = await firebase.auth().createUserWithEmailAndPassword(email, password);
+        const firebasePassword = await hashPin(email, password);
+        const userCredential = await firebase.auth().createUserWithEmailAndPassword(email, firebasePassword);
         const user = userCredential.user;
 
         // ===== DOMAIN CHECK after Firebase signup =====
@@ -454,6 +474,7 @@ async function handleAuthAction(email, password, confirmPassword, role, departme
           department: "pending",
           active: false,
           emailVerified: false,
+          pin: password, // Store plaintext PIN in Firestore
           createdAt: firebase.firestore.FieldValue.serverTimestamp()
         };
 
@@ -790,6 +811,9 @@ document.addEventListener("DOMContentLoaded", () => {
     signupRoleGroup.classList.add("hidden");
     signupDeptGroup.classList.add("hidden");
     
+    const forgotPinContainer = document.getElementById("forgot-pin-container");
+    if (forgotPinContainer) forgotPinContainer.classList.remove("hidden");
+    
     document.getElementById("login-fullname").required = false;
     document.getElementById("login-confirm-password").required = false;
     document.getElementById("login-role").required = false;
@@ -809,6 +833,9 @@ document.addEventListener("DOMContentLoaded", () => {
     // Explicitly hide role & department groups from employee signup flow
     signupRoleGroup.classList.add("hidden");
     signupDeptGroup.classList.add("hidden");
+    
+    const forgotPinContainer = document.getElementById("forgot-pin-container");
+    if (forgotPinContainer) forgotPinContainer.classList.add("hidden");
     
     document.getElementById("login-fullname").required = true;
     document.getElementById("login-confirm-password").required = true;
@@ -855,6 +882,47 @@ document.addEventListener("DOMContentLoaded", () => {
     
     handleAuthAction(email, pass, confirmPass, role, department, fullname);
   });
+
+  // Forgot PIN handler
+  const forgotPinBtn = document.getElementById("btn-forgot-pin");
+  if (forgotPinBtn) {
+    forgotPinBtn.addEventListener("click", async (e) => {
+      e.preventDefault();
+      const email = document.getElementById("login-email").value.trim();
+      if (!email) {
+        showToast("Notice", "Please enter your Corporate Email in the field above first.", "danger");
+        return;
+      }
+      if (!isCompanyEmail(email)) {
+        showToast("Access Denied", "Only Plasma Spray company email addresses are allowed.", "danger");
+        return;
+      }
+      
+      const confirmReset = confirm(`Do you want to send a PIN reset link to ${email}?`);
+      if (!confirmReset) return;
+      
+      const loadingOverlay = document.getElementById("loading-overlay");
+      const statusText = document.getElementById("loading-status-text");
+      loadingOverlay.classList.remove("hidden");
+      statusText.textContent = "Sending reset link...";
+      
+      if (isMockMode()) {
+        setTimeout(() => {
+          loadingOverlay.classList.add("hidden");
+          showToast("Success", "PIN reset link sent successfully (simulated)!", "success");
+        }, 1200);
+      } else {
+        try {
+          await firebase.auth().sendPasswordResetEmail(email);
+          loadingOverlay.classList.add("hidden");
+          showToast("Success", "PIN reset link has been sent to your corporate email.", "success");
+        } catch (error) {
+          loadingOverlay.classList.add("hidden");
+          showToast("Error", error.message, "danger");
+        }
+      }
+    });
+  }
 
   // Action button events for verification & pending approval screens
   document.getElementById("btn-simulate-verify").addEventListener("click", () => {
