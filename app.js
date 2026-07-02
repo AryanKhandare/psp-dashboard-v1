@@ -119,6 +119,16 @@ function splitJobAndProgress(job, doneQty, nextDept, operatorName, stageName, st
     job[stageKey].quantity = restQty;
     job[stageKey].durationMs = 0;
     job[stageKey].activeTimeMs = 0;
+  } else if (stageKey === "spraying") {
+    job[stageKey].batchId = "";
+    job[stageKey].processedQty = 0;
+    job[stageKey].totalPasses = 0;
+    job[stageKey].finalTemp = "";
+    job[stageKey].finalThickness = "";
+    job[stageKey].finalSize = "";
+    job[stageKey].powderConsumed = "";
+    job[stageKey].durationMs = 0;
+    job[stageKey].activeTimeMs = 0;
   }
 
   // Push to local jobs
@@ -158,8 +168,10 @@ let machines = [];
 let selectedJobKp = null;
 let timerIntervalId = null;
 let activeMaskingSubtab = "masking-subtab-queue"; // Default sub-tab
+let activeSprayingSubtab = "spraying-subtab-queue"; // Default spraying sub-tab
 let activeGrindingSubtab = "grinding-subtab-queue"; // Default grinding sub-tab
 let activeDmdSubtab = "dmd-subtab-health"; // Default DMD sub-tab
+let selectedSprayingJobKp = null; // Spraying active job selection state
 let selectedOperatorName = null; // Operator modal selection state
 let selectedShiftName = "A Shift"; // Shift modal selection state
 let selectedHoldReason = null; // Hold Reason touch select state
@@ -224,6 +236,10 @@ function getOeeCurrentMode(dept) {
   
   if (dept === "Masking") {
     const activeJob = jobs.find(j => j.currentDepartment === "Masking" && j.masking.status === "In Progress");
+    return activeJob ? "ACTIVE" : "IDLE";
+  }
+  if (dept === "Spraying") {
+    const activeJob = jobs.find(j => j.currentDepartment === "Spraying" && j.spraying?.status === "In Progress");
     return activeJob ? "ACTIVE" : "IDLE";
   }
   if (dept === "Grinding") {
@@ -301,6 +317,7 @@ const parserWorkerCode = `
         const statusYVal = cols[8] ? String(cols[8].v || "").trim() : "";
         const jcNo       = cols[9] ? String(cols[9].v || "").trim() : "";
         const firStVal   = cols[10] ? String(cols[10].v || "").trim() : "";
+        const processTypeVal = cols[11] ? String(cols[11].v || "").trim() : "";
 
         let assignedFirst = "", assignedSecond = "";
         if (assignedRaw) {
@@ -309,7 +326,7 @@ const parserWorkerCode = `
           assignedSecond = parts[1] || "";
         }
 
-        return { kpNo: kpVal, customer, partName, quantity, status, assignedFirst, assignedSecond, timestamp, actual: actualVal, statusY: statusYVal, jcNo, firSt: firStVal };
+        return { kpNo: kpVal, customer, partName, quantity, status, assignedFirst, assignedSecond, timestamp, actual: actualVal, statusY: statusYVal, jcNo, firSt: firStVal, processType: processTypeVal };
       }).filter(r => r.kpNo && /^kp-/i.test(r.kpNo));
 
       let filtered = records;
@@ -380,6 +397,7 @@ async function parseRowsMainThreadAsync(rows, op, chunkSize = 200) {
         const statusYVal = cols[8] ? String(cols[8].v || "").trim() : "";
         const jcNo       = cols[9] ? String(cols[9].v || "").trim() : "";
         const firStVal   = cols[10] ? String(cols[10].v || "").trim() : "";
+        const processTypeVal = cols[11] ? String(cols[11].v || "").trim() : "";
 
         let assignedFirst = "", assignedSecond = "";
         if (assignedRaw) {
@@ -397,7 +415,7 @@ async function parseRowsMainThreadAsync(rows, op, chunkSize = 200) {
             keep = (a1 === upperOp || a2 === upperOp);
           }
           if (keep) {
-            results.push({ kpNo: kpVal, customer, partName, quantity, status, assignedFirst, assignedSecond, timestamp, actual: actualVal, statusY: statusYVal, jcNo, firSt: firStVal });
+            results.push({ kpNo: kpVal, customer, partName, quantity, status, assignedFirst, assignedSecond, timestamp, actual: actualVal, statusY: statusYVal, jcNo, firSt: firStVal, processType: processTypeVal });
           }
         }
       }
@@ -721,7 +739,7 @@ async function loadInspectionKPs(forceRefresh = false, isAutoRefresh = false) {
   try {
     // ─── Construct exact-matching SQL Query ───
     // Query column T (KP No), F (Customer), I (Part Name), L (Qty), C (Delivered Status), V (Assigned), A (Timestamp), X (Actual), Y (Status)
-    let query = "SELECT T, F, I, J, C, V, A, X, Y, S, AM WHERE T IS NOT NULL AND (C IS NULL OR LOWER(C) != 'delivered')";
+    let query = "SELECT T, F, I, J, C, V, A, X, Y, S, AM, AU WHERE T IS NOT NULL AND (C IS NULL OR LOWER(C) != 'delivered')";
     if (op) {
       const lowerOp = op.trim().toLowerCase();
       query += ` AND (LOWER(V) = '${lowerOp}' OR LOWER(V) LIKE '${lowerOp} /%' OR LOWER(V) LIKE '%/ ${lowerOp}' OR LOWER(V) LIKE '%/ ${lowerOp} /%')`;
@@ -777,6 +795,13 @@ async function loadInspectionKPs(forceRefresh = false, isAutoRefresh = false) {
       }
     });
 
+    // Persist KP→JC map to localStorage for instant loading on next page load
+    try {
+      localStorage.setItem("psp_kp_to_jc_map", JSON.stringify(window.kpToJcMap));
+    } catch (e) {
+      console.warn("[Inspection] Failed to cache KP→JC map:", e);
+    }
+
     // Also update any loaded jobs in memory
     if (Array.isArray(window.jobs)) {
       window.jobs.forEach(j => {
@@ -810,6 +835,20 @@ async function loadInspectionKPs(forceRefresh = false, isAutoRefresh = false) {
   }
 }
 
+function shouldBypassMasking(partName) {
+  if (!partName) return false;
+  const p = partName.trim().toLowerCase();
+  const bypassParts = [
+    "test coupon",
+    "button",
+    "flat",
+    "cylinder",
+    "copper samples",
+    "wire drawing drum ( block )"
+  ];
+  return bypassParts.some(bp => p === bp || p.includes(bp));
+}
+
 async function autoSyncJobsFromSpreadsheet(records) {
   window.autoImportedKPs = window.autoImportedKPs || new Set();
   
@@ -817,13 +856,11 @@ async function autoSyncJobsFromSpreadsheet(records) {
     const kpNo = record.kpNo;
     
     // Determine target stage:
-    // If Column X (Actual) is empty OR Column Y (Status) is empty (or not "done" case-insensitive), it should be in Inspection.
-    // If Column X (Actual) is NOT empty AND Column Y (Status) is "done", it should be in Masking.
-    // Determine target stage:
     // If Column Y (Status) is NOT "done", target department is "Inspection".
     // If Column Y (Status) is "done":
     //   If Column AM (FIR ST) is NOT "done", target department is "Masking".
     //   If Column AM (FIR ST) is "done" (both are done), target department is "Final Inspection".
+    // SPECIAL BYPASS: If part matches shouldBypassMasking, target department is "Spraying" instead of "Masking".
     const statusYDone = record.statusY && record.statusY.trim().toLowerCase() === "done";
     const firStDone = record.firSt && record.firSt.trim().toLowerCase() === "done";
     
@@ -832,7 +869,11 @@ async function autoSyncJobsFromSpreadsheet(records) {
       if (firStDone) {
         targetDept = "Final Inspection";
       } else {
-        targetDept = "Masking";
+        if (shouldBypassMasking(record.partName)) {
+          targetDept = "Spraying";
+        } else {
+          targetDept = "Masking";
+        }
       }
     }
     
@@ -861,27 +902,34 @@ async function autoSyncJobsFromSpreadsheet(records) {
         updates.customer = record.customer;
         fieldsChanged = true;
       }
+      if (record.jcNo && record.jcNo !== existingJob.jcNo) {
+        existingJob.jcNo = record.jcNo;
+        updates.jcNo = record.jcNo;
+        fieldsChanged = true;
+      }
+      if (record.processType && record.processType !== existingJob.processType) {
+        console.log(`[Auto-Sync] Job ${kpNo} processType mismatch: local=${existingJob.processType}, sheet=${record.processType}. Updating...`);
+        existingJob.processType = record.processType;
+        updates.processType = record.processType;
+        fieldsChanged = true;
+      }
 
       if (fieldsChanged) {
         renderAll();
-        if (!isMockMode()) {
+        if (!isMockMode() && existingJob.id) {
           const db = firebase.firestore();
-          db.collection("jobs").where("kpNumber", "==", kpNo).get().then(snap => {
-            if (!snap.empty) {
-              snap.docs[0].ref.update(updates).then(() => {
-                console.log(`[Auto-Sync] Job ${kpNo} fields updated in Firestore.`);
-              }).catch(err => {
-                console.error(`[Auto-Sync] Failed to update fields in Firestore for ${kpNo}:`, err);
-              });
-            }
+          db.collection("jobs").doc(existingJob.id).update(updates).then(() => {
+            console.log(`[Auto-Sync] Job ${kpNo} fields updated in Firestore.`);
+          }).catch(err => {
+            console.error(`[Auto-Sync] Failed to update fields in Firestore for ${kpNo}:`, err);
           });
         } else {
           saveState();
         }
       }
 
-      // Sync only if job is currently in either Inspection or Masking stage, or target stage is Final Inspection
-      if (existingJob.currentDepartment === "Inspection" || existingJob.currentDepartment === "Masking" || targetDept === "Final Inspection") {
+      // Sync only if job is currently in either Inspection or Masking stage, or target stage is Final Inspection or Spraying
+      if (existingJob.currentDepartment === "Inspection" || existingJob.currentDepartment === "Masking" || targetDept === "Final Inspection" || targetDept === "Spraying") {
         if (existingJob.currentDepartment !== targetDept) {
           if (window.autoImportedKPs.has(kpNo.toLowerCase())) {
             continue;
@@ -908,6 +956,9 @@ async function autoSyncJobsFromSpreadsheet(records) {
           } else if (targetDept === "Final Inspection") {
             existingJob.finalInspection = existingJob.finalInspection || {};
             existingJob.finalInspection.status = "Pending";
+          } else if (targetDept === "Spraying") {
+            existingJob.spraying = existingJob.spraying || {};
+            existingJob.spraying.status = "Pending";
           } else {
             existingJob.masking = existingJob.masking || {};
             existingJob.masking.status = "Pending";
@@ -952,10 +1003,11 @@ async function autoSyncJobsFromSpreadsheet(records) {
         partName: record.partName,
         customer: record.customer,
         quantity: Number(record.quantity) || 1,
-        processType: "Plasma",
+        processType: record.processType || "Plasma",
         priority: "Normal",
         currentDepartment: targetDept,
         status: "Pending",
+        jcNo: record.jcNo || "",
         inspectionDate: new Date().toISOString().split('T')[0]
       };
       
@@ -964,8 +1016,9 @@ async function autoSyncJobsFromSpreadsheet(records) {
         partName: record.partName,
         customer: record.customer,
         quantity: Number(record.quantity) || 1,
-        processType: "Plasma",
+        processType: record.processType || "Plasma",
         priority: "Normal",
+        jcNo: record.jcNo || "",
         inspectionDate: new Date().toISOString().split('T')[0],
         receivedDate: "",
         currentDepartment: targetDept,
@@ -1154,11 +1207,7 @@ async function syncMaskingJobToBackend(job, nextDept) {
     const result = await response.json();
     console.log("Saved masking job response from backend:", result);
     
-    // Refresh spraying iframe if active
-    const sprayingIframe = document.getElementById("spraying-iframe");
-    if (sprayingIframe && sprayingIframe.contentWindow) {
-      sprayingIframe.contentWindow.dispatchEvent(new CustomEvent("refresh-spraying-data"));
-    }
+    renderSprayingDashboard();
   } catch (err) {
     console.error("Failed to sync completed masking job to backend:", err);
   }
@@ -1281,6 +1330,7 @@ async function initApp() {
   startClock();
   setupNav();
   setupMaskingSubtabs();
+  setupSprayingSubtabs();
   setupGrindingSubtabs();
   setupHamburger();
   populateHeaderUser();
@@ -1428,13 +1478,26 @@ async function sendBackendPost(payload) {
       stageData.lastStartedAt = payload.startTime || new Date().toISOString();
       stageData.holdHistory = payload.holdHistory || [];
       
-      await jobRef.update({
+      // Copy all additional payload fields to stageData dynamically
+      for (const [key, value] of Object.entries(payload)) {
+        if (!["type", "kpNo", "stage", "operatorName", "shift", "startTime", "lastStartedAt", "holdHistory"].includes(key)) {
+          stageData[key] = value;
+        }
+      }
+      
+      const updateFields = {
         currentStatus: "In Progress",
         assignedOperator: { uid: currentUser?.uid || "", name: payload.operatorName || "" },
         shift: payload.shift || "",
         lastUpdated: firebase.firestore.FieldValue.serverTimestamp(),
         [stageKey]: stageData
-      });
+      };
+      
+      if (payload.storeLocation) {
+        updateFields.storeLocation = payload.storeLocation;
+      }
+      
+      await jobRef.update(updateFields);
       
       await createFirestoreAuditLog(payload.operatorName, payload.stage, payload.kpNo, "Cycle Started", `Commenced ${payload.stage} process on ${payload.shift || "A Shift"}`);
       return { success: true };
@@ -1508,6 +1571,8 @@ async function sendBackendPost(payload) {
       if (payload.finalSize !== undefined) stageData.finalSize = payload.finalSize;
       if (payload.powderConsumed !== undefined) stageData.powderConsumed = payload.powderConsumed;
       if (payload.location !== undefined) stageData.location = payload.location;
+      if (payload.operatorName !== undefined) stageData.operatorName = payload.operatorName;
+      if (payload.sprayingBooth !== undefined) stageData.sprayingBooth = payload.sprayingBooth;
       
       const nextStage = payload.nextStage || "Spraying";
       const nextStageKey = nextStage.toLowerCase().replace(/[^a-z]/g, "");
@@ -1633,6 +1698,7 @@ async function sendBackendPost(payload) {
         currentStage: payload.currentDepartment || "Inspection",
         currentStatus: payload.status || "Inspection Pending",
         storeLocation: payload.storeLocation || "",
+        jcNo: payload.jcNo || "",
         createdDate: firebase.firestore.FieldValue.serverTimestamp(),
         createdBy: currentUser?.email || "System",
         lastUpdated: firebase.firestore.FieldValue.serverTimestamp(),
@@ -1918,6 +1984,7 @@ function startFirestoreListeners() {
       snapshot.forEach(doc => {
         const data = doc.data();
         const job = {
+          id: doc.id,
           jobId: data.jobId || doc.id,
           kpNumber: data.kpNumber,
           partName: data.partName || "Unknown Part",
@@ -2457,17 +2524,7 @@ function applySidebarPermissions() {
     }
   }
 
-  // Load or unload the Spraying iframe dynamically based on tab permissions to prevent background execution of checks
-  const sprayingIframe = document.getElementById("spraying-iframe");
-  if (sprayingIframe) {
-    if (isTabAuthorized("tab-spraying")) {
-      if (!sprayingIframe.src || sprayingIframe.src.indexOf("spraying.html") === -1) {
-        sprayingIframe.src = "spraying.html";
-      }
-    } else {
-      sprayingIframe.src = "about:blank";
-    }
-  }
+
 }
 
 function handleRouting(isInitialLoad = false) {
@@ -2674,8 +2731,22 @@ async function createAuditLog(user, kpNumber, action) {
 }
 
 
-// Global KP to JC Number mapping
-window.kpToJcMap = window.kpToJcMap || {};
+// Global KP to JC Number mapping — restore cached map from localStorage for instant JC display
+(function restoreCachedJcMap() {
+  if (window.kpToJcMap && Object.keys(window.kpToJcMap).length > 0) return;
+  try {
+    const cached = localStorage.getItem("psp_kp_to_jc_map");
+    if (cached) {
+      window.kpToJcMap = JSON.parse(cached);
+      console.log("[JC Map] Restored", Object.keys(window.kpToJcMap).length, "KP→JC mappings from cache.");
+    } else {
+      window.kpToJcMap = {};
+    }
+  } catch (e) {
+    console.warn("[JC Map] Failed to restore cached map:", e);
+    window.kpToJcMap = {};
+  }
+})();
 
 function getJobJcNo(job) {
   if (!job) return "";
@@ -2721,7 +2792,7 @@ function renderAll() {
   renderDmdDashboard();
 
   // Update OEE UI immediately
-  ["Masking", "Grinding", "Polishing"].forEach(dept => {
+  ["Masking", "Spraying", "Grinding", "Polishing"].forEach(dept => {
     const state = loadOeeState(dept);
     const mode = getOeeCurrentMode(dept);
     updateOeeUi(dept, state, mode);
@@ -3392,11 +3463,17 @@ function startStateTimer() {
       }
     }
 
-    // 3. If selected grinding job is running, refresh the grinding digital screen
+    // 3. If selected grinding/spraying job is running, refresh their digital screens
     if (selectedGrindingJobKp) {
       const activeGrindingJob = jobs.find(j => j.kpNumber === selectedGrindingJobKp);
       if (activeGrindingJob) {
         updateGrindingTimerReadout(activeGrindingJob);
+      }
+    }
+    if (selectedSprayingJobKp) {
+      const activeSprayingJob = jobs.find(j => j.kpNumber === selectedSprayingJobKp);
+      if (activeSprayingJob) {
+        updateSprayingTimerReadout(activeSprayingJob);
       }
     }
 
@@ -3405,6 +3482,9 @@ function startStateTimer() {
     if (typeof renderGrindingActiveCards === "function") {
       renderGrindingActiveCards();
     }
+    if (typeof renderSprayingActiveCards === "function") {
+      renderSprayingActiveCards();
+    }
 
     // 5. OEE metrics background timer update
     const now = Date.now();
@@ -3412,7 +3492,7 @@ function startStateTimer() {
     const elapsedSec = Math.floor(elapsedMs / 1000);
     if (elapsedSec > 0) {
       oeeLastTickTime = now;
-      ["Masking", "Grinding", "Polishing"].forEach(dept => {
+      ["Masking", "Spraying", "Grinding", "Polishing"].forEach(dept => {
         const state = loadOeeState(dept);
         const mode = getOeeCurrentMode(dept);
         
@@ -4104,11 +4184,858 @@ function renderJobHistory() {
 }
 
 // 10. TAB VIEW: SPRAYING DASHBOARD (Integrated React console in iframe)
+// 10. TAB VIEW: SPRAYING DASHBOARD
 function renderSprayingDashboard() {
-  const sprayingIframe = document.getElementById("spraying-iframe");
-  if (sprayingIframe && sprayingIframe.contentWindow) {
-    sprayingIframe.contentWindow.dispatchEvent(new CustomEvent("refresh-spraying-data"));
+  renderSprayingKpis();
+  renderSprayingLiveQueue();
+  renderSprayingActiveJobTimer();
+  renderSprayingHistory();
+}
+
+function renderSprayingKpis() {
+  const pending = jobs.filter(j => j.currentDepartment === "Spraying" && (!j.spraying || j.spraying.status === "Pending")).length;
+  const running = jobs.filter(j => j.currentDepartment === "Spraying" && (j.spraying?.status === "In Progress" || j.spraying?.status === "Hold")).length;
+  const completed = jobs.filter(j => j.spraying?.status === "Completed").length;
+
+  const pEl = document.getElementById("spraying-kpis-pending");
+  const rEl = document.getElementById("spraying-kpis-running");
+  const cEl = document.getElementById("spraying-kpis-completed");
+  const aEl = document.getElementById("spraying-kpis-avgtime");
+
+  if (pEl) pEl.textContent = pending;
+  if (rEl) rEl.textContent = running;
+  if (cEl) cEl.textContent = completed;
+
+  const completedSprayingJobs = jobs.filter(j => j.spraying?.status === "Completed");
+  let avgCycleStr = "00:00:00";
+  if (completedSprayingJobs.length > 0) {
+    const totalDuration = completedSprayingJobs.reduce((sum, j) => sum + (j.spraying?.durationMs || 0), 0);
+    const avgMs = totalDuration / completedSprayingJobs.length;
+    avgCycleStr = formatDuration(avgMs);
   }
+  if (aEl) aEl.textContent = avgCycleStr;
+}
+
+function renderSprayingLiveQueue() {
+  const container = document.getElementById("spraying-queue-cards");
+  if (!container) return;
+
+  container.innerHTML = "";
+
+  const filterKpVal = document.getElementById("spraying-filter-kp").value.trim().toLowerCase();
+  const filterJcVal = document.getElementById("spraying-filter-jc") ? document.getElementById("spraying-filter-jc").value.trim().toLowerCase() : "";
+  const filterCustVal = document.getElementById("spraying-filter-customer").value.trim().toLowerCase();
+
+  const sprayingJobs = jobs.filter(j => {
+    if (j.currentDepartment !== "Spraying" || j.spraying?.status === "Completed") return false;
+
+    if (filterKpVal && !j.kpNumber.toLowerCase().includes(filterKpVal)) return false;
+    if (filterJcVal && !getJobJcNo(j).toLowerCase().includes(filterJcVal)) return false;
+    if (filterCustVal && !j.customer.toLowerCase().includes(filterCustVal)) return false;
+
+    return true;
+  });
+
+  if (sprayingJobs.length === 0) {
+    container.innerHTML = `<div class="no-selection-message" style="grid-column: 1 / -1; width: 100%;">No jobs match the queue filters.</div>`;
+    return;
+  }
+
+  sprayingJobs.forEach(job => {
+    const card = document.createElement("div");
+    card.className = "job-queue-card";
+    
+    let statusClass = "badge-pending";
+    let statusText = "Pending";
+    if (job.spraying?.status === "In Progress") {
+      statusClass = "badge-progress";
+      statusText = "In Progress";
+    } else if (job.spraying?.status === "Hold") {
+      statusClass = "badge-hold";
+      statusText = "Hold";
+    }
+
+    let actionButton = "";
+    if (!job.spraying || job.spraying.status === "Pending") {
+      actionButton = `<button class="btn btn-success btn-tablet-primary" onclick="openSprayingAssignModal('${job.kpNumber}')">START SPRAYING</button>`;
+    } else {
+      actionButton = `<button class="btn btn-primary btn-tablet-primary" onclick="selectActiveSprayingJobAndSwitch('${job.kpNumber}')">VIEW STATION</button>`;
+    }
+
+    const kpClean = getCleanKpNumber(job.kpNumber);
+    const jcNo = getJobJcNo(job);
+    
+    const splitRemarkHtml = job.splitRemark ? `
+      <div class="job-card-row split-remark-row" style="margin-top: 4px; display: flex; flex-direction: column; align-items: flex-start;">
+        <span class="job-card-label" style="color: #f97316 !important; font-size: 11px; font-weight: bold;">Split Remark:</span>
+        <span class="job-card-value" style="color: #f97316 !important; font-size: 11px; white-space: normal; word-break: break-word;">${job.splitRemark}</span>
+      </div>
+    ` : "";
+
+    const assignedOpHtml = job.assignedOperator ? `
+      <div class="job-card-row">
+        <span class="job-card-label">Operator:</span>
+        <span class="job-card-value font-bold text-cyan">${job.assignedOperator}</span>
+      </div>
+    ` : "";
+
+    card.innerHTML = `
+      <div class="job-card-header">
+        <span class="job-card-kp">${kpClean}${jcNo ? ` (${jcNo})` : ""}</span>
+        <span class="badge ${statusClass}">${statusText}</span>
+      </div>
+      <div class="job-card-body">
+        <div class="job-card-row">
+          <span class="job-card-label">Part Name:</span>
+          <span class="job-card-value">${job.partName}</span>
+        </div>
+        <div class="job-card-row">
+          <span class="job-card-label">Customer:</span>
+          <span class="job-card-value">${job.customer}</span>
+        </div>
+        <div class="job-card-row">
+          <span class="job-card-label">Process:</span>
+          <span class="job-card-value text-cyan font-bold">${job.processType || "Plasma"}</span>
+        </div>
+        <div class="job-card-row">
+          <span class="job-card-label">Quantity:</span>
+          <span class="job-card-value font-mono">${renderQuantityWithHistory(job)}</span>
+        </div>
+        ${splitRemarkHtml}
+        ${assignedOpHtml}
+      </div>
+      <div class="job-card-actions" style="margin-top: 10px; width: 100%;">
+        ${actionButton}
+      </div>
+    `;
+    container.appendChild(card);
+  });
+}
+
+function openSprayingAssignModal(kpNumber) {
+  const modal = document.getElementById("modal-start-spraying");
+  const kpDisplay = document.getElementById("modal-spraying-kp-display");
+
+  const job = jobs.find(j => j.kpNumber === kpNumber);
+  if (!job) return;
+
+  kpDisplay.textContent = kpNumber;
+  modal.classList.add("active");
+
+  const form = document.getElementById("spraying-start-form");
+  const newForm = form.cloneNode(true);
+  form.parentNode.replaceChild(newForm, form);
+
+  const currentQtyInput = newForm.querySelector("#spraying-start-qty-input");
+  const currentBatchInput = newForm.querySelector("#spraying-start-batch-id");
+  const currentLocationSelect = newForm.querySelector("#spraying-start-location-select");
+  const currentBoothSelect = newForm.querySelector("#spraying-start-booth-select");
+  const currentBoothGroup = newForm.querySelector("#spraying-start-booth-group");
+  const currentOperatorSelect = newForm.querySelector("#spraying-start-operator-select");
+  const currentOperatorCustomGroup = newForm.querySelector("#spraying-start-operator-custom-group");
+  const currentOperatorCustomInput = newForm.querySelector("#spraying-start-operator-custom");
+  const currentCancelBtn = newForm.querySelector("#btn-cancel-start-spraying");
+  const currentSubmitBtn = newForm.querySelector("#btn-submit-start-spraying");
+
+  // Initialize values on the cloned inputs
+  currentQtyInput.value = job.quantity;
+  currentQtyInput.max = job.quantity;
+  currentBatchInput.value = "";
+  
+  // Set up operator list
+  currentOperatorSelect.innerHTML = '<option value="" disabled selected>Select Operator</option>';
+  const opsList = ["prism", "Suraj", "Amrish", "Duryodhan", "TJ", "Bhushan", "Avinash"];
+  opsList.forEach(op => {
+    const opt = document.createElement("option");
+    opt.value = op;
+    opt.textContent = op;
+    currentOperatorSelect.appendChild(opt);
+  });
+  const optOther = document.createElement("option");
+  optOther.value = "Other";
+  optOther.textContent = "Other";
+  currentOperatorSelect.appendChild(optOther);
+
+  // Operator select change listener
+  currentOperatorSelect.addEventListener("change", (e) => {
+    if (e.target.value === "Other") {
+      currentOperatorCustomGroup.style.display = "block";
+      currentOperatorCustomInput.required = true;
+    } else {
+      currentOperatorCustomGroup.style.display = "none";
+      currentOperatorCustomInput.required = false;
+      currentOperatorCustomInput.value = "";
+    }
+  });
+
+  // Location select change listener to populate booth dynamically
+  currentLocationSelect.addEventListener("change", (e) => {
+    const loc = e.target.value;
+    currentBoothSelect.innerHTML = '<option value="" disabled selected>Select Booth</option>';
+    
+    // Find all occupied booths from jobs array
+    const occupiedBooths = jobs
+      .filter(j => j.currentDepartment === "Spraying" && (j.spraying?.status === "In Progress" || j.spraying?.status === "Hold"))
+      .map(j => j.spraying?.sprayingBooth)
+      .filter(Boolean);
+
+    if (loc === "B-37") {
+      currentBoothGroup.style.display = "block";
+      currentBoothSelect.required = true;
+      ["Booth 4", "Booth 5"].forEach(b => {
+        const opt = document.createElement("option");
+        opt.value = b;
+        const occ = occupiedBooths.includes(b);
+        if (occ) {
+          opt.textContent = b + " (Occupied)";
+          opt.disabled = true;
+        } else {
+          opt.textContent = b;
+        }
+        currentBoothSelect.appendChild(opt);
+      });
+    } else if (loc === "C-20/4") {
+      currentBoothGroup.style.display = "block";
+      currentBoothSelect.required = true;
+      ["Booth 1", "Booth 2", "Booth 3"].forEach(b => {
+        const opt = document.createElement("option");
+        opt.value = b;
+        const occ = occupiedBooths.includes(b);
+        if (occ) {
+          opt.textContent = b + " (Occupied)";
+          opt.disabled = true;
+        } else {
+          opt.textContent = b;
+        }
+        currentBoothSelect.appendChild(opt);
+      });
+    } else {
+      currentBoothGroup.style.display = "none";
+      currentBoothSelect.required = false;
+    }
+  });
+
+  currentLocationSelect.value = ""; // Force user to choose
+  currentLocationSelect.required = true;
+
+  if (currentSubmitBtn) {
+    currentSubmitBtn.textContent = "Start Spraying Cycle";
+  }
+  currentBatchInput.required = true;
+
+  if (currentCancelBtn) {
+    currentCancelBtn.addEventListener("click", () => {
+      modal.classList.remove("active");
+    });
+  }
+
+  newForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const qty = Number(currentQtyInput.value);
+    const batchId = currentBatchInput.value.trim();
+    const loc = currentLocationSelect.value;
+    
+    // Resolve operator name
+    const opSelectVal = currentOperatorSelect.value;
+    let finalOpName = opSelectVal;
+    if (opSelectVal === "Other") {
+      finalOpName = currentOperatorCustomInput.value.trim();
+    }
+    const boothVal = currentBoothSelect.value;
+
+    if (!finalOpName) {
+      alert("Please select or enter Operator Name");
+      return;
+    }
+    if (!boothVal) {
+      alert("Please select Spraying Booth");
+      return;
+    }
+
+    // Double check booth occupancy in case jobs array updated
+    const occupiedBooths = jobs
+      .filter(j => j.currentDepartment === "Spraying" && j.kpNumber !== job.kpNumber && (j.spraying?.status === "In Progress" || j.spraying?.status === "Hold"))
+      .map(j => j.spraying?.sprayingBooth)
+      .filter(Boolean);
+    if (occupiedBooths.includes(boothVal)) {
+      alert(`Booth "${boothVal}" is currently occupied by another job. Please select a vacant booth.`);
+      return;
+    }
+
+    modal.classList.remove("active");
+    await startSprayingCycle(job.kpNumber, finalOpName, batchId, qty, loc, boothVal);
+  });
+}
+
+async function startSprayingCycle(kp, opName, batchId, qty, locationVal, boothVal) {
+  const activeJob = jobs.find(j => j.currentDepartment === "Spraying" && j.spraying?.sprayingBooth === boothVal && (j.spraying?.status === "In Progress" || j.spraying?.status === "Hold"));
+  if (activeJob) {
+    alert(`Another Spraying cycle is already active in ${boothVal}!`);
+    return;
+  }
+  
+  const job = jobs.find(j => j.kpNumber === kp);
+  if (!job) return;
+
+  const nowStr = new Date().toISOString();
+  
+  job.status = "In Progress";
+  job.shift = selectedShiftName || "A Shift";
+  job.operatorName = opName;
+  job.assignedOperator = opName;
+  job.storeLocation = locationVal;
+  job.spraying = job.spraying || {};
+  job.spraying.status = "In Progress";
+  job.spraying.batchId = batchId;
+  job.spraying.processedQty = Number(qty);
+  job.spraying.startTime = nowStr;
+  job.spraying.lastStartedAt = nowStr;
+  job.spraying.operatorName = opName;
+  job.spraying.sprayingBooth = boothVal;
+  job.spraying.location = locationVal;
+  job.spraying.shift = selectedShiftName || "A Shift";
+  job.spraying.holdHistory = [];
+  job.spraying.activeTimeMs = 0;
+
+  switchToSprayingSubtab("spraying-subtab-active");
+  renderAll();
+
+  const payload = {
+    type: "START_CYCLE",
+    kpNo: kp,
+    stage: "Spraying",
+    operatorName: opName,
+    shift: selectedShiftName || "A Shift",
+    startTime: nowStr,
+    quantity: Number(qty),
+    storeLocation: locationVal,
+    sprayingBooth: boothVal,
+    batchId: batchId,
+    holdHistory: []
+  };
+
+  try {
+    if (!isMockMode() && sendBackendPost) {
+      await sendBackendPost(payload);
+    }
+    await createFirestoreAuditLog(opName, "Spraying", kp, "Cycle Started", `Commenced Spraying process (Batch ID: ${batchId}, Qty: ${qty})`);
+    saveState();
+    renderAll();
+  } catch (err) {
+    console.error("Failed to start spraying cycle:", err);
+    alert("Error starting spraying cycle. Please try again.");
+  }
+}
+
+async function completeSprayingDirectly(job, qty, locationVal) {
+  const isSplit = qty < job.quantity;
+  let payload = null;
+
+  if (isSplit) {
+    const stageData = {
+      batchId: "",
+      processedQty: qty,
+      location: locationVal,
+      durationMs: 0
+    };
+    payload = splitJobAndProgress(job, qty, "Grinding", "Spraying Operator", "Spraying", stageData);
+  } else {
+    job.spraying = job.spraying || {};
+    job.spraying.status = "Completed";
+    transitionToStage(job, "Grinding", "Spraying Operator");
+    payload = {
+      type: "END_CYCLE",
+      kpNo: job.kpNumber,
+      stage: "Spraying",
+      nextStage: "Grinding",
+      endTime: new Date().toISOString(),
+      activeTimeMs: 0,
+      processedQty: qty,
+      location: locationVal
+    };
+  }
+
+  try {
+    if (!isMockMode() && sendBackendPost && payload) {
+      await sendBackendPost(payload);
+    }
+    await createFirestoreAuditLog("Spraying Operator", "Spraying", job.kpNumber, "Location Updated", `Job routed directly to Grinding at location: ${locationVal}`);
+    saveState();
+    renderAll();
+  } catch (err) {
+    console.error("Direct spraying completion failed:", err);
+    alert("Error saving location. Please try again.");
+  }
+}
+
+function renderSprayingActiveJobTimer() {
+  const noActiveMsg = document.getElementById("spraying-no-active-job-message");
+  const activeInterface = document.getElementById("spraying-active-job-timer-interface");
+
+  if (!noActiveMsg || !activeInterface) return;
+
+  let activeJob = null;
+  if (selectedSprayingJobKp) {
+    activeJob = jobs.find(j => j.kpNumber === selectedSprayingJobKp && j.currentDepartment === "Spraying" && (j.spraying?.status === "In Progress" || j.spraying?.status === "Hold"));
+  }
+  if (!activeJob) {
+    activeJob = jobs.find(j => j.currentDepartment === "Spraying" && (j.spraying?.status === "In Progress" || j.spraying?.status === "Hold"));
+  }
+
+  if (!activeJob) {
+    noActiveMsg.style.display = "block";
+    activeInterface.style.display = "none";
+    selectedSprayingJobKp = null;
+    window.sprayingJobActive = false;
+    return;
+  }
+
+  selectedSprayingJobKp = activeJob.kpNumber;
+  window.sprayingJobActive = (activeJob.spraying.status === "In Progress");
+
+  noActiveMsg.style.display = "none";
+  activeInterface.style.display = "block";
+
+  document.getElementById("spraying-active-kp-no").textContent = getCleanKpNumber(activeJob.kpNumber);
+  document.getElementById("spraying-active-part-name").textContent = activeJob.partName;
+  document.getElementById("spraying-active-customer").textContent = activeJob.customer;
+  const activeProcEl = document.getElementById("spraying-active-process-type");
+  if (activeProcEl) activeProcEl.textContent = activeJob.processType || "Plasma";
+  document.getElementById("spraying-active-qty").textContent = activeJob.spraying?.processedQty || activeJob.quantity;
+  document.getElementById("spraying-active-batch-id").textContent = activeJob.spraying?.batchId || "-";
+  document.getElementById("spraying-active-location").textContent = activeJob.storeLocation || "-";
+  
+  const boothEl = document.getElementById("spraying-active-booth");
+  if (boothEl) boothEl.textContent = activeJob.spraying?.sprayingBooth || "-";
+  
+  const opEl = document.getElementById("spraying-active-operator");
+  if (opEl) opEl.textContent = activeJob.spraying?.operatorName || activeJob.operatorName || "-";
+
+  const btnPause = document.getElementById("btn-spraying-pause-cycle");
+  const btnResume = document.getElementById("btn-spraying-resume-cycle");
+  const btnEnd = document.getElementById("btn-spraying-end-cycle");
+  const statusBadge = document.getElementById("spraying-active-cycle-status-badge");
+
+  if (activeJob.spraying.status === "In Progress") {
+    statusBadge.className = "badge badge-progress";
+    statusBadge.textContent = "RUNNING";
+    btnPause.style.display = "flex";
+    btnResume.style.display = "none";
+    btnEnd.style.display = "flex";
+  } else if (activeJob.spraying.status === "Hold") {
+    statusBadge.className = "badge badge-critical";
+    statusBadge.textContent = "ON HOLD";
+    btnPause.style.display = "none";
+    btnResume.style.display = "flex";
+    btnEnd.style.display = "flex";
+  }
+
+  updateSprayingTimerReadout(activeJob);
+}
+
+function updateSprayingTimerReadout(job) {
+  const currentTimerDigits = document.getElementById("spraying-timer-readout");
+  const startedSpan = document.getElementById("spraying-time-started");
+  const pausedSpan = document.getElementById("spraying-time-paused-total");
+
+  if (!currentTimerDigits) return;
+
+  if (job.spraying?.status === "In Progress" && job.spraying?.lastStartedAt) {
+    const elapsedMs = (job.spraying.activeTimeMs || 0) + (Date.now() - new Date(job.spraying.lastStartedAt).getTime());
+    currentTimerDigits.textContent = formatDuration(elapsedMs);
+  } else if (job.spraying?.status === "Hold") {
+    currentTimerDigits.textContent = formatDuration(job.spraying.activeTimeMs || 0);
+  } else {
+    currentTimerDigits.textContent = "00:00:00";
+  }
+
+  startedSpan.textContent = job.spraying?.startTime ? new Date(job.spraying.startTime).toLocaleTimeString() : "--:--:--";
+  
+  let pausedMs = 0;
+  const holds = job.spraying?.holdHistory || [];
+  holds.forEach(h => {
+    const pauseTime = new Date(h.pausedAt).getTime();
+    const resumeTime = h.resumedAt ? new Date(h.resumedAt).getTime() : Date.now();
+    pausedMs += (resumeTime - pauseTime);
+  });
+  pausedSpan.textContent = formatDuration(pausedMs);
+}
+
+function renderSprayingActiveCards() {
+  renderSprayingActiveJobTimer();
+}
+
+function pauseSprayingCycle() {
+  let activeJob = null;
+  if (selectedSprayingJobKp) {
+    activeJob = jobs.find(j => j.kpNumber === selectedSprayingJobKp && j.currentDepartment === "Spraying" && j.spraying?.status === "In Progress");
+  }
+  if (!activeJob) {
+    activeJob = jobs.find(j => j.currentDepartment === "Spraying" && j.spraying?.status === "In Progress");
+  }
+  if (!activeJob) return;
+
+  const modal = document.getElementById("modal-pause-spraying");
+  const kpDisplay = document.getElementById("modal-pause-spraying-kp-display");
+  kpDisplay.textContent = activeJob.kpNumber;
+
+  modal.classList.add("active");
+
+  const form = document.getElementById("spraying-pause-form");
+  const reasonSelect = document.getElementById("spraying-pause-reason-select");
+  const remarksInput = document.getElementById("spraying-pause-remarks");
+
+  reasonSelect.value = "";
+  remarksInput.value = "";
+
+  const newForm = form.cloneNode(true);
+  form.parentNode.replaceChild(newForm, form);
+
+  newForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const reason = document.getElementById("spraying-pause-reason-select").value;
+    const remarks = document.getElementById("spraying-pause-remarks").value;
+
+    const nowStr = new Date().toISOString();
+    const lastStarted = activeJob.spraying.lastStartedAt;
+    const elapsedMs = lastStarted ? (Date.now() - new Date(lastStarted).getTime()) : 0;
+    const currentActiveTime = (activeJob.spraying.activeTimeMs || 0) + elapsedMs;
+
+    const holdEvent = {
+      pausedAt: nowStr,
+      resumedAt: null,
+      reason: reason,
+      remarks: remarks
+    };
+
+    const holdHistory = [...(activeJob.spraying.holdHistory || []), holdEvent];
+
+    activeJob.status = "Hold";
+    activeJob.spraying.status = "Hold";
+    activeJob.spraying.lastPausedAt = nowStr;
+    activeJob.spraying.activeTimeMs = currentActiveTime;
+    activeJob.spraying.holdHistory = holdHistory;
+
+    modal.classList.remove("active");
+    renderAll();
+
+    const payload = {
+      type: "PAUSE_CYCLE",
+      kpNo: activeJob.kpNumber,
+      stage: "Spraying",
+      operatorName: activeJob.operatorName,
+      activeTimeMs: currentActiveTime,
+      holdReason: reason,
+      remarks: remarks,
+      holdHistory: holdHistory
+    };
+
+    try {
+      if (!isMockMode() && sendBackendPost) {
+        await sendBackendPost(payload);
+      }
+      await createFirestoreAuditLog(activeJob.operatorName, "Spraying", activeJob.kpNumber, "Cycle Paused", `Paused Spraying cycle. Reason: ${reason}. Remarks: ${remarks}`);
+      saveState();
+      renderAll();
+    } catch (err) {
+      console.error("Failed to pause spraying cycle:", err);
+      alert("Error pausing cycle.");
+    }
+  });
+}
+
+async function resumeSprayingCycle() {
+  let activeJob = null;
+  if (selectedSprayingJobKp) {
+    activeJob = jobs.find(j => j.kpNumber === selectedSprayingJobKp && j.currentDepartment === "Spraying" && j.spraying?.status === "Hold");
+  }
+  if (!activeJob) {
+    activeJob = jobs.find(j => j.currentDepartment === "Spraying" && j.spraying?.status === "Hold");
+  }
+  if (!activeJob) return;
+
+  const nowStr = new Date().toISOString();
+  const holdHistory = [...(activeJob.spraying.holdHistory || [])];
+  if (holdHistory.length > 0) {
+    holdHistory[holdHistory.length - 1].resumedAt = nowStr;
+  }
+
+  activeJob.status = "In Progress";
+  activeJob.spraying.status = "In Progress";
+  activeJob.spraying.lastStartedAt = nowStr;
+  activeJob.spraying.holdHistory = holdHistory;
+
+  renderAll();
+
+  const payload = {
+    type: "RESUME_CYCLE",
+    kpNo: activeJob.kpNumber,
+    stage: "Spraying",
+    operatorName: activeJob.operatorName,
+    holdHistory: holdHistory
+  };
+
+  try {
+    if (!isMockMode() && sendBackendPost) {
+      await sendBackendPost(payload);
+    }
+    await createFirestoreAuditLog(activeJob.operatorName, "Spraying", activeJob.kpNumber, "Cycle Resumed", "Job returned to active spraying state");
+    saveState();
+    renderAll();
+  } catch (err) {
+    console.error("Failed to resume spraying cycle:", err);
+    alert("Error resuming cycle.");
+  }
+}
+
+function endSprayingCycle() {
+  let activeJob = null;
+  if (selectedSprayingJobKp) {
+    activeJob = jobs.find(j => j.kpNumber === selectedSprayingJobKp && j.currentDepartment === "Spraying" && (j.spraying?.status === "In Progress" || j.spraying?.status === "Hold"));
+  }
+  if (!activeJob) {
+    activeJob = jobs.find(j => j.currentDepartment === "Spraying" && (j.spraying?.status === "In Progress" || j.spraying?.status === "Hold"));
+  }
+  if (!activeJob) return;
+
+  const modal = document.getElementById("modal-complete-spraying");
+  const kpDisplay = document.getElementById("modal-complete-spraying-kp-display");
+  const qtyInput = document.getElementById("spraying-complete-qty");
+  const nextSelect = document.getElementById("spraying-complete-next-process");
+  const passesInput = document.getElementById("spraying-complete-passes");
+  const tempInput = document.getElementById("spraying-complete-temp");
+  const thicknessInput = document.getElementById("spraying-complete-thickness");
+  const sizeInput = document.getElementById("spraying-complete-size");
+  const powderInput = document.getElementById("spraying-complete-powder");
+  const locationSelect = document.getElementById("spraying-complete-location");
+
+  kpDisplay.textContent = activeJob.kpNumber;
+  qtyInput.value = activeJob.spraying?.processedQty || activeJob.quantity;
+  qtyInput.max = activeJob.spraying?.processedQty || activeJob.quantity;
+  nextSelect.value = "Grinding";
+  passesInput.value = "";
+  tempInput.value = "";
+  thicknessInput.value = "";
+  sizeInput.value = "";
+  powderInput.value = "";
+  locationSelect.value = activeJob.storeLocation || "B-37";
+
+  modal.classList.add("active");
+
+  const form = document.getElementById("spraying-complete-form");
+  const newForm = form.cloneNode(true);
+  form.parentNode.replaceChild(newForm, form);
+
+  const currentQtyInput = document.getElementById("spraying-complete-qty");
+  const currentNextSelect = document.getElementById("spraying-complete-next-process");
+  const currentPassesInput = document.getElementById("spraying-complete-passes");
+  const currentTempInput = document.getElementById("spraying-complete-temp");
+  const currentThicknessInput = document.getElementById("spraying-complete-thickness");
+  const currentSizeInput = document.getElementById("spraying-complete-size");
+  const currentPowderInput = document.getElementById("spraying-complete-powder");
+  const currentLocationSelect = document.getElementById("spraying-complete-location");
+
+  newForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const doneQty = Number(currentQtyInput.value);
+    const nextDept = currentNextSelect.value;
+    const passes = Number(currentPassesInput.value);
+    const temp = currentTempInput.value;
+    const thickness = currentThicknessInput.value;
+    const size = currentSizeInput.value;
+    const powder = currentPowderInput.value;
+    const locationVal = currentLocationSelect.value;
+
+    const originalQty = activeJob.spraying?.processedQty || activeJob.quantity;
+    if (doneQty > originalQty) {
+      alert("Completed quantity cannot exceed running quantity!");
+      return;
+    }
+
+    const elapsedMs = (activeJob.spraying.activeTimeMs || 0) + (activeJob.spraying.status === "In Progress" && activeJob.spraying.lastStartedAt ? (Date.now() - new Date(activeJob.spraying.lastStartedAt).getTime()) : 0);
+    
+    const stageData = {
+      batchId: activeJob.spraying.batchId || "",
+      processedQty: doneQty,
+      totalPasses: passes,
+      finalTemp: temp,
+      finalThickness: thickness,
+      finalSize: size,
+      powderConsumed: powder,
+      location: locationVal,
+      durationMs: elapsedMs
+    };
+
+    const isSplit = doneQty < originalQty;
+    let payload = null;
+
+    modal.classList.remove("active");
+
+    if (isSplit) {
+      payload = splitJobAndProgress(activeJob, doneQty, nextDept, activeJob.operatorName, "Spraying", stageData);
+    } else {
+      activeJob.spraying = activeJob.spraying || {};
+      activeJob.spraying.status = "Completed";
+      Object.assign(activeJob.spraying, stageData);
+      transitionToStage(activeJob, nextDept, activeJob.operatorName);
+      
+      payload = {
+        type: "END_CYCLE",
+        kpNo: activeJob.kpNumber,
+        stage: "Spraying",
+        nextStage: nextDept,
+        endTime: new Date().toISOString(),
+        activeTimeMs: elapsedMs,
+        batchId: stageData.batchId,
+        processedQty: doneQty,
+        totalPasses: passes,
+        finalTemp: temp,
+        finalThickness: thickness,
+        finalSize: size,
+        powderConsumed: powder,
+        location: locationVal,
+        operatorName: activeJob.operatorName
+      };
+    }
+
+    try {
+      if (!isMockMode() && sendBackendPost && payload) {
+        await sendBackendPost(payload);
+      }
+      await createFirestoreAuditLog(activeJob.operatorName, "Spraying", activeJob.kpNumber, "Cycle Ended", `Completed Spraying process, routed to ${nextDept}`);
+      
+      selectedSprayingJobKp = null;
+      saveState();
+      renderAll();
+    } catch (err) {
+      console.error("Failed to complete spraying cycle:", err);
+      alert("Error completing spraying cycle. Please try again.");
+    }
+  });
+}
+
+function renderSprayingHistory() {
+  const tbody = document.getElementById("spraying-history-table-body");
+  if (!tbody) return;
+
+  tbody.innerHTML = "";
+
+  const completedJobs = jobs.filter(j => j.spraying?.status === "Completed");
+
+  if (completedJobs.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="11" class="text-center text-muted">No completed jobs in Spraying.</td></tr>`;
+    return;
+  }
+
+  completedJobs.forEach(job => {
+    const tr = document.createElement("tr");
+
+    tr.innerHTML = `
+      <td class="font-mono font-bold text-cyan">${getCleanKpNumber(job.kpNumber)}${getJobJcNo(job) ? ` (${getJobJcNo(job)})` : ""}</td>
+      <td>${job.partName}</td>
+      <td>${job.customer}</td>
+      <td class="font-mono">${job.spraying?.processedQty || job.quantity}</td>
+      <td>${job.spraying?.batchId || "-"}</td>
+      <td class="font-mono">${job.spraying?.totalPasses || "-"}</td>
+      <td class="font-mono">${job.spraying?.finalTemp || "-"}</td>
+      <td class="font-mono">${job.spraying?.finalThickness || "-"}</td>
+      <td class="font-mono">${job.spraying?.finalSize || "-"}</td>
+      <td class="font-mono">${job.spraying?.powderConsumed || "-"}</td>
+      <td><span class="badge badge-completed">Completed</span></td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function setupSprayingSubtabs() {
+  const subtabButtons = document.querySelectorAll("#spraying-tabs-nav .grinding-tab-btn");
+
+  subtabButtons.forEach(btn => {
+    btn.addEventListener("click", () => {
+      const targetSubtab = btn.getAttribute("data-subtab");
+      if (!targetSubtab) return;
+      switchToSprayingSubtab(targetSubtab);
+      renderSprayingDashboard();
+    });
+  });
+
+  const filterKp = document.getElementById("spraying-filter-kp");
+  if (filterKp) filterKp.addEventListener("input", renderSprayingLiveQueue);
+
+  const filterJc = document.getElementById("spraying-filter-jc");
+  if (filterJc) filterJc.addEventListener("input", renderSprayingLiveQueue);
+
+  const filterCust = document.getElementById("spraying-filter-customer");
+  if (filterCust) filterCust.addEventListener("input", renderSprayingLiveQueue);
+
+  const clearFilters = document.getElementById("spraying-clear-filters");
+  if (clearFilters) {
+    clearFilters.addEventListener("click", () => {
+      document.getElementById("spraying-filter-kp").value = "";
+      if (document.getElementById("spraying-filter-jc")) document.getElementById("spraying-filter-jc").value = "";
+      document.getElementById("spraying-filter-customer").value = "";
+      renderSprayingLiveQueue();
+    });
+  }
+
+  const btnPause = document.getElementById("btn-spraying-pause-cycle");
+  if (btnPause) btnPause.addEventListener("click", pauseSprayingCycle);
+
+  const btnResume = document.getElementById("btn-spraying-resume-cycle");
+  if (btnResume) btnResume.addEventListener("click", resumeSprayingCycle);
+
+  const btnEnd = document.getElementById("btn-spraying-end-cycle");
+  if (btnEnd) btnEnd.addEventListener("click", endSprayingCycle);
+
+  const closeStartModal = () => { document.getElementById("modal-start-spraying").classList.remove("active"); };
+  document.getElementById("btn-close-start-spraying")?.addEventListener("click", closeStartModal);
+  document.getElementById("btn-cancel-start-spraying")?.addEventListener("click", closeStartModal);
+
+  const closeCompleteModal = () => { document.getElementById("modal-complete-spraying").classList.remove("active"); };
+  document.getElementById("btn-close-complete-spraying")?.addEventListener("click", closeCompleteModal);
+  document.getElementById("btn-cancel-complete-spraying")?.addEventListener("click", closeCompleteModal);
+
+  const closePauseModal = () => { document.getElementById("modal-pause-spraying").classList.remove("active"); };
+  document.getElementById("btn-close-pause-spraying")?.addEventListener("click", closePauseModal);
+  document.getElementById("btn-cancel-pause-spraying")?.addEventListener("click", closePauseModal);
+
+  window.openSprayingAssignModal = openSprayingAssignModal;
+  window.selectActiveSprayingJobAndSwitch = selectActiveSprayingJobAndSwitch;
+  window.switchToSprayingSubtab = switchToSprayingSubtab;
+}
+
+function switchToSprayingSubtab(subtabId) {
+  activeSprayingSubtab = subtabId;
+  const subtabButtons = document.querySelectorAll("#spraying-tabs-nav .grinding-tab-btn");
+  const subtabPanels = [
+    document.getElementById("spraying-subtab-queue"),
+    document.getElementById("spraying-subtab-active"),
+    document.getElementById("spraying-subtab-history")
+  ];
+
+  subtabButtons.forEach(btn => {
+    if (btn.getAttribute("data-subtab") === subtabId) {
+      btn.classList.add("active");
+    } else {
+      btn.classList.remove("active");
+    }
+  });
+
+  subtabPanels.forEach(panel => {
+    if (panel) {
+      if (panel.id === subtabId) {
+        panel.classList.add("active");
+      } else {
+        panel.classList.remove("active");
+      }
+    }
+  });
+}
+
+function selectActiveSprayingJobAndSwitch(kp) {
+  selectedSprayingJobKp = kp;
+  switchToSprayingSubtab("spraying-subtab-active");
+  renderAll();
 }
 
 // 11. TAB VIEW: AUDIT LOG VIEWER
@@ -4157,8 +5084,12 @@ function openAssignModal(kpNumber) {
 
   // Set default selection from header selects
   const logged = getLoggedUser();
-  selectedOperatorName = logged.name;
-  selectedShiftName = logged.shift;
+  if (logged && logged.name && !logged.name.toLowerCase().includes("admin") && !logged.name.includes("@")) {
+    selectedOperatorName = logged.name;
+  } else {
+    selectedOperatorName = null;
+  }
+  selectedShiftName = logged ? (logged.shift || "A Shift") : "A Shift";
 
   // Render Operator Touch Buttons
   opButtonsContainer.innerHTML = "";
@@ -4248,7 +5179,11 @@ function openNoMaskingModal(kpNumber) {
   
   // Set default selection
   const logged = getLoggedUser();
-  selectedNoMaskingOperatorName = logged.name;
+  if (logged && logged.name && !logged.name.toLowerCase().includes("admin") && !logged.name.includes("@")) {
+    selectedNoMaskingOperatorName = logged.name;
+  } else {
+    selectedNoMaskingOperatorName = null;
+  }
   
   // Render Operator Touch Buttons
   opButtonsContainer.innerHTML = "";
@@ -4688,11 +5623,7 @@ async function submitCompleteMasking(e) {
     transitionToStage(job, nextDept, job.masking.operatorName || getLoggedUser().name);
   }
 
-  // Refresh spraying iframe if active
-  const sprayingIframe = document.getElementById("spraying-iframe");
-  if (sprayingIframe && sprayingIframe.contentWindow) {
-    sprayingIframe.contentWindow.dispatchEvent(new CustomEvent("refresh-spraying-data"));
-  }
+  renderSprayingDashboard();
 
   selectedJobKp = null;
   closeCompleteMaskingModal();
@@ -4703,9 +5634,7 @@ async function submitCompleteMasking(e) {
   sendBackendPost(payload)
     .then(() => {
       pendingSyncCount--;
-      if (sprayingIframe && sprayingIframe.contentWindow) {
-        sprayingIframe.contentWindow.dispatchEvent(new CustomEvent("refresh-spraying-data"));
-      }
+      renderSprayingDashboard();
       if (pendingSyncCount === 0) {
         return loadState().then(() => renderAll());
       }
@@ -4890,6 +5819,7 @@ function renderGrindingLiveQueue() {
   cardsContainer.innerHTML = "";
 
   const filterKp = document.getElementById("grinding-filter-kp").value.toLowerCase();
+  const filterJc = document.getElementById("grinding-filter-jc") ? document.getElementById("grinding-filter-jc").value.toLowerCase() : "";
   const filterCust = document.getElementById("grinding-filter-customer").value.toLowerCase();
   const filterMach = document.getElementById("grinding-filter-machine").value;
   const filterProc = document.getElementById("grinding-filter-process").value;
@@ -4898,6 +5828,7 @@ function renderGrindingLiveQueue() {
     if (j.currentDepartment !== "Grinding" || j.grinding?.status === "Completed") return false;
     
     if (filterKp && !j.kpNumber.toLowerCase().includes(filterKp)) return false;
+    if (filterJc && !getJobJcNo(j).toLowerCase().includes(filterJc)) return false;
     if (filterCust && !j.customer.toLowerCase().includes(filterCust)) return false;
     if (filterMach && j.grinding?.machineName !== filterMach) return false;
     if (filterProc && j.grinding?.processType !== filterProc) return false;
@@ -6413,6 +7344,9 @@ function setupEventListeners() {
   // Grinding Queue Filters
   const grindFilterKp = document.getElementById("grinding-filter-kp");
   if (grindFilterKp) grindFilterKp.addEventListener("input", renderGrindingLiveQueue);
+
+  const grindFilterJc = document.getElementById("grinding-filter-jc");
+  if (grindFilterJc) grindFilterJc.addEventListener("input", renderGrindingLiveQueue);
   
   const grindFilterCust = document.getElementById("grinding-filter-customer");
   if (grindFilterCust) grindFilterCust.addEventListener("input", renderGrindingLiveQueue);
@@ -6427,6 +7361,7 @@ function setupEventListeners() {
   if (grindClearFilters) {
     grindClearFilters.addEventListener("click", () => {
       document.getElementById("grinding-filter-kp").value = "";
+      if (document.getElementById("grinding-filter-jc")) document.getElementById("grinding-filter-jc").value = "";
       document.getElementById("grinding-filter-customer").value = "";
       document.getElementById("grinding-filter-machine").value = "";
       document.getElementById("grinding-filter-process").value = "";
@@ -6542,10 +7477,23 @@ function renderDmdDashboard() {
 
   // 1. Telemetry metrics
   const activeSessions = users.filter(u => u.active).length;
+  
+  const countInspect = jobs.filter(j => j.currentDepartment === "Inspection").length;
+  const countMasking = jobs.filter(j => j.currentDepartment === "Masking" && j.masking?.status !== "Completed").length;
+  const countSpraying = jobs.filter(j => j.currentDepartment === "Spraying" && j.spraying?.status !== "Completed").length;
+  const countGrinding = jobs.filter(j => j.currentDepartment === "Grinding" && j.grinding?.status !== "Completed").length;
+  const countPolishing = jobs.filter(j => j.currentDepartment === "Polishing" && j.polishing?.status !== "Completed").length;
+  const countFinal = jobs.filter(j => j.currentDepartment === "Final Inspection" && j.finalInspection?.status !== "Completed").length;
+  const countDispatch = jobs.filter(j => j.currentDepartment === "Dispatch" && j.dispatch?.status !== "Completed").length;
+  const totalActiveStageJobs = countInspect + countMasking + countSpraying + countGrinding + countPolishing + countFinal + countDispatch;
+
   document.getElementById("dmd-telemetry-jobs-count").textContent = jobs.length;
   document.getElementById("dmd-telemetry-users-count").textContent = users.length;
   document.getElementById("dmd-telemetry-audit-count").textContent = auditLogs.length;
   document.getElementById("dmd-telemetry-active-sessions").textContent = activeSessions;
+  
+  const activePipelineEl = document.getElementById("dmd-telemetry-active-pipeline-count");
+  if (activePipelineEl) activePipelineEl.textContent = totalActiveStageJobs;
 
   // 2. Health & Latency
   const firestoreStatusEl = document.getElementById("dmd-health-firestore-status");

@@ -903,10 +903,233 @@
       </section>
 
       <!-- ============================================= -->
-      <!-- TAB: SPRAYING DASHBOARD (SIMULATED OUTPUT STAGE) -->
+      <!-- TAB: SPRAYING DASHBOARD -->
       <!-- ============================================= -->
-      <section id="tab-spraying" class="tab-pane" style="height: calc(100vh - 70px); width: calc(100% + 40px); margin: -20px; padding: 0; overflow: hidden;">
-        <iframe id="spraying-iframe" src="about:blank" style="width: 100%; height: 100%; border: none; overflow: hidden; display: block;" allow="fullscreen" allowfullscreen></iframe>
+      <section id="tab-spraying" class="tab-pane">
+        
+        <!-- SECTION HEADER -->
+        <div class="masking-dashboard-header">
+          <div class="section-title-wrapper">
+            <h2>SPRAYING DEPARTMENT CONTROL PANEL</h2>
+            <p class="section-desc">Track active spraying processes, shift OEE, powder usage, temperatures, and location logging.</p>
+          </div>
+        </div>
+        
+        <!-- OEE METRICS GRID -->
+        <div class="oee-metrics-grid" id="spraying-oee-grid">
+          <div class="oee-card" id="spraying-oee-card-oee">
+            <span class="oee-lbl">SHIFT OEE</span>
+            <span class="oee-val" id="spraying-oee-val-oee">0.0%</span>
+          </div>
+          <div class="oee-card" id="spraying-oee-card-nowork">
+            <span class="oee-lbl">NO WORK</span>
+            <span class="oee-val" id="spraying-oee-val-nowork">00:00:00</span>
+          </div>
+          <div class="oee-card" id="spraying-oee-card-idle">
+            <span class="oee-lbl">OPERATOR IDLE</span>
+            <span class="oee-val" id="spraying-oee-val-idle">00:00:00</span>
+          </div>
+          <div class="oee-card" id="spraying-oee-card-active">
+            <span class="oee-lbl">ACTIVE WORK</span>
+            <span class="oee-val" id="spraying-oee-val-active">00:00:00</span>
+          </div>
+        </div>
+
+        <!-- KPI CARDS CONTAINER -->
+        <div class="grinding-kpis-grid" style="grid-template-columns: repeat(4, 1fr); margin-bottom: 20px;">
+          <div class="metric-card">
+            <span class="metric-val text-orange" id="spraying-kpis-pending">0</span>
+            <span class="metric-lbl">Pending Jobs</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-val text-blue" id="spraying-kpis-running">0</span>
+            <span class="metric-lbl">Running Jobs</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-val text-green" id="spraying-kpis-completed">0</span>
+            <span class="metric-lbl">Completed Jobs</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-val font-mono" id="spraying-kpis-avgtime" style="font-size: 24px !important;">00:00:00</span>
+            <span class="metric-lbl">Average Cycle Time</span>
+          </div>
+        </div>
+
+        <!-- SUB-NAVIGATION TABS FOR SPRAYING -->
+        <div class="grinding-tabs-nav" id="spraying-tabs-nav">
+          <button type="button" class="grinding-tab-btn active" data-subtab="spraying-subtab-queue">
+            <span class="subtab-icon">📋</span>
+            <span class="subtab-label">Queue</span>
+          </button>
+          <button type="button" class="grinding-tab-btn" data-subtab="spraying-subtab-active">
+            <span class="subtab-icon">⚡</span>
+            <span class="subtab-label">Active Job</span>
+          </button>
+          <button type="button" class="grinding-tab-btn" data-subtab="spraying-subtab-history">
+            <span class="subtab-icon">📜</span>
+            <span class="subtab-label">History</span>
+          </button>
+        </div>
+
+        <!-- SUBTAB 1: QUEUE -->
+        <div id="spraying-subtab-queue" class="grinding-subtab-panel active">
+          <div class="panel">
+            <div class="panel-header">
+              <h3>MODULE 01: SPRAYING LIVE QUEUE</h3>
+              <span class="panel-subtitle">Displaying approved jobs waiting for spraying operations.</span>
+            </div>
+            <div class="panel-body">
+              <!-- Filters Toolbar -->
+              <div class="filters-toolbar">
+                <div class="filter-group">
+                  <label for="spraying-filter-kp">KP No:</label>
+                  <input type="text" id="spraying-filter-kp" class="form-input input-sm" placeholder="Search KP...">
+                </div>
+                <div class="filter-group">
+                  <label for="spraying-filter-jc">JC No:</label>
+                  <input type="text" id="spraying-filter-jc" class="form-input input-sm" placeholder="Search JC...">
+                </div>
+                <div class="filter-group">
+                  <label for="spraying-filter-customer">Customer:</label>
+                  <input type="text" id="spraying-filter-customer" class="form-input input-sm" placeholder="Search Customer...">
+                </div>
+                <button id="spraying-clear-filters" class="btn btn-secondary btn-sm" style="height:60px; min-width: 120px;">CLEAR FILTERS</button>
+              </div>
+
+              <!-- Queue Cards Grid -->
+              <div id="spraying-queue-cards" class="queue-cards-grid">
+                <!-- Dynamic Content generated in app.js -->
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- SUBTAB 2: ACTIVE JOB -->
+        <div id="spraying-subtab-active" class="grinding-subtab-panel">
+          <div class="split-layout">
+            <div class="panel active-operation-panel">
+              <div class="panel-header header-alert">
+                <h3>MODULE 02: ACTIVE SPRAYING STATION MONITOR</h3>
+                <div class="live-dot-pulse">
+                  <span class="pulse-dot"></span>
+                  <span class="pulse-txt">SPRAYING CYCLE</span>
+                </div>
+              </div>
+              <div class="panel-body">
+                <div id="spraying-no-active-job-message" class="no-selection-message">
+                  <p>NO ACTIVE SPRAYING CYCLE RUNNING</p>
+                  <span class="sub-text">Select a job from the Queue sub-tab and tap "Start Spraying" to show the timer panel.</span>
+                </div>
+
+                <div id="spraying-active-job-timer-interface" class="timer-interface-grid" style="display: none;">
+                  <!-- Metadata rows -->
+                  <div class="job-meta-details">
+                    <div class="meta-row">
+                      <span class="meta-label">KP NUMBER:</span>
+                      <span id="spraying-active-kp-no" class="font-bold text-cyan" style="font-size:18px;">-</span>
+                    </div>
+                    <div class="meta-row">
+                      <span class="meta-label">COMPONENT PART:</span>
+                      <span id="spraying-active-part-name" class="font-bold">-</span>
+                    </div>
+                    <div class="meta-row">
+                      <span class="meta-label">CUSTOMER:</span>
+                      <span id="spraying-active-customer" class="font-bold">-</span>
+                    </div>
+                    <div class="meta-row">
+                      <span class="meta-label">PROCESS TYPE:</span>
+                      <span id="spraying-active-process-type" class="font-bold text-cyan">-</span>
+                    </div>
+                    <div class="meta-row">
+                      <span class="meta-label">BATCH QUANTITY:</span>
+                      <span id="spraying-active-qty" class="font-bold font-mono text-cyan" style="font-size:18px;">0</span>
+                    </div>
+                    <div class="meta-row">
+                      <span class="meta-label">BATCH ID:</span>
+                      <span id="spraying-active-batch-id" class="badge badge-normal font-bold" style="font-size:14px; padding: 4px 8px;">-</span>
+                    </div>
+                    <div class="meta-row">
+                      <span class="meta-label">STORE LOCATION:</span>
+                      <span id="spraying-active-location" class="font-bold text-orange" style="font-size:18px;">-</span>
+                    </div>
+                    <div class="meta-row">
+                      <span class="meta-label">SPRAYING BOOTH:</span>
+                      <span id="spraying-active-booth" class="font-bold text-cyan" style="font-size:18px;">-</span>
+                    </div>
+                    <div class="meta-row">
+                      <span class="meta-label">OPERATOR:</span>
+                      <span id="spraying-active-operator" class="font-bold text-yellow" style="font-size:18px; color: #facc15;">-</span>
+                    </div>
+                    <div class="meta-row">
+                      <span class="meta-label">CYCLE STATE:</span>
+                      <span id="spraying-active-cycle-status-badge" class="badge badge-progress" style="font-size:14px; padding: 4px 8px;">STANDBY</span>
+                    </div>
+                  </div>
+
+                  <!-- Large visible timer -->
+                  <div class="timer-display-box text-center">
+                    <span class="meta-label">ELAPSED ACTIVE CYCLE RUNTIME</span>
+                    <div class="digital-digits text-cyan" id="spraying-timer-readout">00:00:00</div>
+                    
+                    <div class="timer-secondary-metrics mt-1 text-muted" style="display: flex; justify-content: center; gap: 30px;">
+                      <div>
+                        <span class="timer-sub-lbl">Start: </span>
+                        <span class="font-mono text-xs" id="spraying-time-started">--:--:--</span>
+                      </div>
+                      <div>
+                        <span class="timer-sub-lbl">Paused Time: </span>
+                        <span class="font-mono text-xs text-red" id="spraying-time-paused-total">00:00:00</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Action Buttons -->
+                  <div class="timer-actions-bar mt-1" style="display: flex; gap: 15px; width: 100%;">
+                    <button type="button" class="btn btn-success btn-block glove-btn-lg" id="btn-spraying-start-cycle" style="display:none;">START CYCLE</button>
+                    <button type="button" class="btn btn-danger btn-block glove-btn-lg" id="btn-spraying-pause-cycle">PAUSE CYCLE</button>
+                    <button type="button" class="btn btn-warning btn-block glove-btn-lg" id="btn-spraying-resume-cycle" style="display:none;">RESUME CYCLE</button>
+                    <button type="button" class="btn btn-primary btn-block glove-btn-lg" id="btn-spraying-end-cycle">END CYCLE</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- SUBTAB 3: HISTORY -->
+        <div id="spraying-subtab-history" class="grinding-subtab-panel">
+          <div class="panel">
+            <div class="panel-header">
+              <h3>MODULE 03: COMPLETED SPRAYING JOBS</h3>
+              <span class="panel-subtitle">Displaying jobs completed in the Spraying stage.</span>
+            </div>
+            <div class="panel-body">
+              <div style="overflow-x: auto;">
+                <table class="data-table" id="spraying-history-table">
+                  <thead>
+                    <tr>
+                      <th>KP Number</th>
+                      <th>Part Name</th>
+                      <th>Customer</th>
+                      <th>Qty</th>
+                      <th>Batch ID</th>
+                      <th>Total Passes</th>
+                      <th>Final Temp (°C)</th>
+                      <th>Final Thickness (mm)</th>
+                      <th>Final Size (mm)</th>
+                      <th>Powder Consumed (kg)</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="spraying-history-table-body">
+                    <!-- Dynamic Content generated in app.js -->
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
       </section>
 
       <!-- ============================================= -->
@@ -1035,6 +1258,10 @@
                 <div class="filter-group">
                   <label for="grinding-filter-kp">KP No:</label>
                   <input type="text" id="grinding-filter-kp" class="form-input input-sm" placeholder="Search KP...">
+                </div>
+                <div class="filter-group">
+                  <label for="grinding-filter-jc">JC No:</label>
+                  <input type="text" id="grinding-filter-jc" class="form-input input-sm" placeholder="Search JC...">
                 </div>
                 <div class="filter-group">
                   <label for="grinding-filter-customer">Customer:</label>
@@ -1535,6 +1762,10 @@
                   <div class="kpi-card" style="border-left-color: var(--accent-color); background: rgba(59, 130, 246, 0.05);">
                     <span class="kpi-val" id="dmd-telemetry-active-sessions" style="font-size:32px;">0</span>
                     <span class="kpi-label">Sessions</span>
+                  </div>
+                  <div class="kpi-card" style="border-left-color: #10b981; background: rgba(16, 185, 129, 0.05); grid-column: span 2; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 15px;">
+                    <span class="kpi-val" id="dmd-telemetry-active-pipeline-count" style="font-size:36px; color: #10b981; font-weight: bold; line-height: 1;">0</span>
+                    <span class="kpi-label" style="margin-top: 6px; font-weight: bold; color: #a1a1aa;">ACTIVE SHOP FLOOR JOBS (ALL STAGES)</span>
                   </div>
                 </div>
               </div>
@@ -2093,6 +2324,185 @@
           <div class="form-actions mt-1" style="flex-direction: column; gap: 15px;">
             <button type="submit" class="btn btn-danger btn-tablet-primary" style="height: 60px; font-size: 18px;">Pause Cycle</button>
             <button type="button" class="btn btn-secondary modal-cancel-btn" id="btn-cancel-pause-grinding" style="height: 60px; font-size: 16px; width: 100%;">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================= -->
+  <!-- MODALS FOR SPRAYING STAGE -->
+  <!-- ============================================= -->
+  
+  <!-- MODAL: START SPRAYING -->
+  <div id="modal-start-spraying" class="modal-overlay">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Start Spraying Operation</h3>
+        <button class="modal-close" id="btn-close-start-spraying">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p>Set up parameters and start the Spraying Process for <strong id="modal-spraying-kp-display" class="text-cyan"></strong>.</p>
+        <form id="spraying-start-form" class="industrial-form mt-1">
+          
+          <div class="form-group">
+            <label for="spraying-start-batch-id" style="font-weight: bold; margin-bottom: 5px; display: block;">Batch ID *</label>
+            <input type="text" id="spraying-start-batch-id" class="form-input" placeholder="Enter Batch ID..." style="height: 50px; font-size: 16px; width: 100%;" required>
+          </div>
+
+          <div class="form-grid">
+            <div class="form-group">
+              <label for="spraying-start-qty-input" style="font-weight: bold; margin-bottom: 5px; display: block;">Job Qty (Nos) *</label>
+              <input type="number" id="spraying-start-qty-input" min="1" class="form-input" style="height: 50px; font-size: 16px;" required>
+            </div>
+            <div class="form-group">
+              <label for="spraying-start-location-select" style="font-weight: bold; margin-bottom: 5px; display: block;">Store Location *</label>
+              <select id="spraying-start-location-select" class="form-input" style="height: 50px; font-size: 16px; width: 100%;" required>
+                <option value="" disabled selected>Select Location</option>
+                <option value="B-37">B-37 (Spraying Booth)</option>
+                <option value="C-20/4">C-20/4 (Storage Location)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-grid mt-1">
+            <div class="form-group" id="spraying-start-booth-group" style="display: none;">
+              <label for="spraying-start-booth-select" style="font-weight: bold; margin-bottom: 5px; display: block;">Spraying Booth *</label>
+              <select id="spraying-start-booth-select" class="form-input" style="height: 50px; font-size: 16px; width: 100%;">
+                <option value="" disabled selected>Select Booth</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="spraying-start-operator-select" style="font-weight: bold; margin-bottom: 5px; display: block;">Operator Name *</label>
+              <select id="spraying-start-operator-select" class="form-input" style="height: 50px; font-size: 16px; width: 100%;" required>
+                <option value="" disabled selected>Select Operator</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-group mt-1" id="spraying-start-operator-custom-group" style="display: none;">
+            <label for="spraying-start-operator-custom" style="font-weight: bold; margin-bottom: 5px; display: block;">Custom Operator Name *</label>
+            <input type="text" id="spraying-start-operator-custom" class="form-input" placeholder="Enter Operator Name..." style="height: 50px; font-size: 16px; width: 100%;">
+          </div>
+
+          <div class="form-actions mt-1" style="flex-direction: column; gap: 15px;">
+            <button type="submit" class="btn btn-success btn-tablet-primary" id="btn-submit-start-spraying" style="height: 60px; font-size: 18px;">Start Spraying Cycle</button>
+            <button type="button" class="btn btn-secondary modal-cancel-btn" id="btn-cancel-start-spraying" style="height: 60px; font-size: 16px; width: 100%;">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: COMPLETE SPRAYING -->
+  <div id="modal-complete-spraying" class="modal-overlay">
+    <div class="modal-content" style="max-width: 600px;">
+      <div class="modal-header">
+        <h3>End Spraying Operation</h3>
+        <button class="modal-close" id="btn-close-complete-spraying">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p>Complete Spraying process and route <strong id="modal-complete-spraying-kp-display" class="text-cyan"></strong> to the next queue.</p>
+        <form id="spraying-complete-form" class="industrial-form mt-1">
+          
+          <div class="form-grid">
+            <div class="form-group">
+              <label for="spraying-complete-qty" style="font-weight: bold; margin-bottom: 5px; display: block;">Quantity Done *</label>
+              <input type="number" id="spraying-complete-qty" class="form-input" min="1" style="height: 50px; font-size: 16px;" required>
+            </div>
+            <div class="form-group">
+              <label for="spraying-complete-next-process" style="font-weight: bold; margin-bottom: 5px; display: block;">Next Department *</label>
+              <select id="spraying-complete-next-process" class="form-input" style="height: 50px; font-size: 16px;" required>
+                <option value="Inspection">Inspection</option>
+                <option value="Masking">Masking</option>
+                <option value="Spraying">Spraying</option>
+                <option value="Grinding" selected>Grinding</option>
+                <option value="Polishing">Polishing</option>
+                <option value="Final Inspection">Final Inspection</option>
+                <option value="Dispatch">Dispatch</option>
+                <option value="Rework">Rework</option>
+                <option value="Hold">Hold</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-grid">
+            <div class="form-group">
+              <label for="spraying-complete-passes" style="font-weight: bold; margin-bottom: 5px; display: block;">Total Passes *</label>
+              <input type="number" id="spraying-complete-passes" class="form-input" min="1" style="height: 50px; font-size: 16px;" required>
+            </div>
+            <div class="form-group">
+              <label for="spraying-complete-temp" style="font-weight: bold; margin-bottom: 5px; display: block;">Final Temp (°C) *</label>
+              <input type="text" id="spraying-complete-temp" class="form-input" placeholder="e.g. 150" style="height: 50px; font-size: 16px;" required>
+            </div>
+          </div>
+
+          <div class="form-grid">
+            <div class="form-group">
+              <label for="spraying-complete-thickness" style="font-weight: bold; margin-bottom: 5px; display: block;">Final Thickness (mm) *</label>
+              <input type="text" id="spraying-complete-thickness" class="form-input" placeholder="e.g. 0.25" style="height: 50px; font-size: 16px;" required>
+            </div>
+            <div class="form-group">
+              <label for="spraying-complete-size" style="font-weight: bold; margin-bottom: 5px; display: block;">Final Size (mm) *</label>
+              <input type="text" id="spraying-complete-size" class="form-input" placeholder="e.g. 45.2" style="height: 50px; font-size: 16px;" required>
+            </div>
+          </div>
+
+          <div class="form-grid">
+            <div class="form-group">
+              <label for="spraying-complete-powder" style="font-weight: bold; margin-bottom: 5px; display: block;">Powder Consumed (kg) *</label>
+              <input type="text" id="spraying-complete-powder" class="form-input" placeholder="e.g. 1.2" style="height: 50px; font-size: 16px;" required>
+            </div>
+            <div class="form-group">
+              <label for="spraying-complete-location" style="font-weight: bold; margin-bottom: 5px; display: block;">Store Location *</label>
+              <select id="spraying-complete-location" class="form-input" style="height: 50px; font-size: 16px;" required>
+                <option value="B-37" selected>B-37</option>
+                <option value="C-20/4">C-20/4</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-actions mt-1" style="flex-direction: column; gap: 15px;">
+            <button type="submit" class="btn btn-success btn-tablet-primary" style="height: 60px; font-size: 18px;">Complete & Transfer</button>
+            <button type="button" class="btn btn-secondary modal-cancel-btn" id="btn-cancel-complete-spraying" style="height: 60px; font-size: 16px; width: 100%;">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: PAUSE SPRAYING -->
+  <div id="modal-pause-spraying" class="modal-overlay">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Pause Spraying Operation</h3>
+        <button class="modal-close" id="btn-close-pause-spraying">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p>Select a reason and enter remarks to pause the spraying cycle for <strong id="modal-pause-spraying-kp-display" class="text-cyan"></strong>.</p>
+        <form id="spraying-pause-form" class="industrial-form mt-1">
+          
+          <div class="form-group">
+            <label for="spraying-pause-reason-select" style="font-weight: bold; margin-bottom: 5px; display: block;">Select Hold Reason *</label>
+            <select id="spraying-pause-reason-select" class="form-input" style="height: 60px; font-size: 18px; width: 100%;" required>
+              <option value="">-- Select Reason --</option>
+              <option value="Material Shortage">Material Shortage</option>
+              <option value="Operator Unavailable">Operator Unavailable</option>
+              <option value="Machine Issue">Machine Issue</option>
+              <option value="Quality Issue">Quality Issue</option>
+              <option value="Customer Hold">Customer Hold</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+
+          <div class="form-group mt-1">
+            <label for="spraying-pause-remarks" style="font-weight: bold; margin-bottom: 5px; display: block;">Hold Remarks</label>
+            <input type="text" id="spraying-pause-remarks" placeholder="Enter details..." class="form-input" style="height:60px; font-size:18px; width: 100%;">
+          </div>
+
+          <div class="form-actions mt-1" style="flex-direction: column; gap: 15px;">
+            <button type="submit" class="btn btn-danger btn-tablet-primary" style="height: 60px; font-size: 18px;">Pause Cycle</button>
+            <button type="button" class="btn btn-secondary modal-cancel-btn" id="btn-cancel-pause-spraying" style="height: 60px; font-size: 16px; width: 100%;">Cancel</button>
           </div>
         </form>
       </div>

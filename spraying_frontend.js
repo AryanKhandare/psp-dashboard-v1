@@ -36,9 +36,10 @@ export default function SprayBoothDashboard() {
   const [tempBatchId, setTempBatchId] = useState("");
   const [jobQty, setJobQty] = useState("");
 
-  const [showLocationModal, setShowLocationModal] = useState(false);
-  const [selectedJobForLocation, setSelectedJobForLocation] = useState(null);
   const [jobLocation, setJobLocation] = useState("");
+  const [operatorName, setOperatorName] = useState("");
+  const [customOperatorName, setCustomOperatorName] = useState("");
+  const [sprayingBooth, setSprayingBooth] = useState("");
 
   const [finishedJobForms, setFinishedJobForms] = useState({});
   const [savingJobs, setSavingJobs] = useState({});
@@ -271,97 +272,18 @@ export default function SprayBoothDashboard() {
   }, [appState, pendingJobs.length]);
 
   const handleSelectJob = (job) => {
-    setSelectedJobForLocation(job);
-    setJobLocation("");
-    setShowLocationModal(true);
-  };
-
-  const handleCloseLocationModal = () => {
-    setShowLocationModal(false);
-    setSelectedJobForLocation(null);
-    setJobLocation("");
-  };
-
-  const handleConfirmLocation = async () => {
-    if (!jobLocation) {
-      alert("Please select job location");
-      return;
-    }
-
-    if (!selectedJobForLocation) return;
-
-    if (jobLocation === "C-20/4" || jobLocation === "Outsourcing") {
-      try {
-        const saveLocationRes = await fetch(scriptUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "text/plain",
-          },
-          body: JSON.stringify({
-            type: "MATERIAL_LOCATION",
-            jobId: selectedJobForLocation.id,
-            part: selectedJobForLocation.part,
-            qty: selectedJobForLocation.qty,
-            location: jobLocation,
-          }),
-        });
-
-        if (!saveLocationRes.ok) {
-          throw new Error("Failed to save material location");
-        }
-
-        const statusUpdateRes = await fetch(scriptUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "text/plain",
-          },
-          body: JSON.stringify({
-            type: "DELETE_JOB_QUEUE",
-            jobId: selectedJobForLocation.id,
-          }),
-        });
-
-        if (!statusUpdateRes.ok) {
-          throw new Error("Failed to mark job as removed");
-        }
-
-        setPendingJobs((prev) =>
-          prev.filter((job) => job.id !== selectedJobForLocation.id)
-        );
-
-        setShowLocationModal(false);
-        setSelectedJobForLocation(null);
-        setJobLocation("");
-        setActiveJob(null);
-        cycleBaseRef.current = 0;
-        setCycleSeconds(0);
-        setAppState("SELECT");
-        return;
-      } catch (error) {
-        console.error("Location save/status update failed:", error);
-        alert("Failed to update job status");
-        return;
-      }
-    }
-
-    const updatedJob = {
-      ...selectedJobForLocation,
-      location: jobLocation,
-    };
-
-    cycleBaseRef.current = 0;
-    segmentStartRef.current = Date.now();
-    setCycleSeconds(0);
-    setActiveJob(updatedJob);
+    setActiveJob(job);
+    setJobLocation(job.location || "");
     setAppState("READY");
-    setShowLocationModal(false);
-    setSelectedJobForLocation(null);
-    setJobLocation("");
   };
 
   const handleStart = () => {
     setTempBatchId("");
-    setJobQty("");
+    setJobQty(activeJob ? String(activeJob.qty || "") : "");
+    setJobLocation(activeJob ? (activeJob.location || "") : "");
+    setOperatorName("");
+    setCustomOperatorName("");
+    setSprayingBooth("");
     setShowBatchModal(true);
   };
 
@@ -497,6 +419,8 @@ export default function SprayBoothDashboard() {
           activeWorkTime,
           shiftOEE: oee,
           location: job.location || "",
+          operatorName: job.operatorName || "",
+          sprayingBooth: job.sprayingBooth || "",
         }),
       });
 
@@ -524,6 +448,9 @@ export default function SprayBoothDashboard() {
         setBatchId("");
         setJobQty("");
         setJobLocation("");
+        setOperatorName("");
+        setCustomOperatorName("");
+        setSprayingBooth("");
         cycleBaseRef.current = 0;
         setCycleSeconds(0);
 
@@ -605,6 +532,20 @@ export default function SprayBoothDashboard() {
     fontSize: "clamp(24px, 2.4vw, 32px)",
     fontWeight: 700,
     padding: "0 18px",
+    outline: "none",
+    boxSizing: "border-box",
+  };
+
+  const compactInputStyle = {
+    width: "100%",
+    height: 52,
+    borderRadius: 12,
+    border: "2px solid #475569",
+    background: "#0f172a",
+    color: "white",
+    fontSize: "18px",
+    fontWeight: 700,
+    padding: "0 14px",
     outline: "none",
     boxSizing: "border-box",
   };
@@ -903,102 +844,6 @@ export default function SprayBoothDashboard() {
           </div>
         )}
 
-        {showLocationModal && (
-          <div
-            style={{
-              position: "fixed",
-              inset: 0,
-              background: "rgba(0,0,0,0.75)",
-              zIndex: 9999,
-              display: "flex",
-              justifyContent: "center",
-              alignItems: "center",
-              padding: 20,
-            }}
-          >
-            <div
-              style={{
-                width: "min(560px, 100%)",
-                background: "#1e293b",
-                borderRadius: 28,
-                padding: 28,
-                border: "3px solid #22c55e",
-                boxSizing: "border-box",
-              }}
-            >
-              <div
-                style={{
-                  fontSize: "clamp(28px, 3vw, 34px)",
-                  fontWeight: 900,
-                  color: "white",
-                  marginBottom: 22,
-                  textAlign: "center",
-                }}
-              >
-                Select Job Location
-              </div>
-
-              <select
-                value={jobLocation}
-                onChange={(e) => setJobLocation(e.target.value)}
-                style={{
-                  ...commonInputStyle,
-                  marginBottom: 22,
-                }}
-              >
-                <option value="">Select Location</option>
-                <option value="C-20/4">C-20/4</option>
-                <option value="B-37">B-37</option>
-                <option value="Outsourcing">Outsourcing</option>
-              </select>
-
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 1fr",
-                  gap: 14,
-                }}
-              >
-                <button
-                  type="button"
-                  onClick={handleCloseLocationModal}
-                  style={{
-                    width: "100%",
-                    height: 84,
-                    borderRadius: 20,
-                    border: "2px solid #64748b",
-                    background: "#334155",
-                    color: "white",
-                    fontSize: "clamp(24px, 2.7vw, 30px)",
-                    fontWeight: 900,
-                    cursor: "pointer",
-                  }}
-                >
-                  BACK
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleConfirmLocation}
-                  style={{
-                    width: "100%",
-                    height: 84,
-                    borderRadius: 20,
-                    border: "none",
-                    background: "#2563eb",
-                    color: "white",
-                    fontSize: "clamp(24px, 2.7vw, 30px)",
-                    fontWeight: 900,
-                    cursor: "pointer",
-                  }}
-                >
-                  CONFIRM
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
         {showBatchModal && (
           <div
             style={{
@@ -1020,6 +865,8 @@ export default function SprayBoothDashboard() {
                 padding: 28,
                 border: "3px solid #3b82f6",
                 boxSizing: "border-box",
+                maxHeight: "90vh",
+                overflowY: "auto",
               }}
             >
               <div
@@ -1031,104 +878,235 @@ export default function SprayBoothDashboard() {
                   textAlign: "center",
                 }}
               >
-                Enter Batch Details
+                Start Spraying Cycle
               </div>
 
-              <input
-                value={tempBatchId}
-                onChange={(e) => setTempBatchId(e.target.value)}
-                autoFocus
-                placeholder="Batch ID"
-                style={{
-                  ...commonInputStyle,
-                  marginBottom: 18,
-                }}
-              />
+              {/* Batch ID */}
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ color: "#94a3b8", display: "block", marginBottom: 6, fontWeight: "bold", fontSize: 18 }}>Batch ID:</label>
+                <input
+                  value={tempBatchId}
+                  onChange={(e) => setTempBatchId(e.target.value)}
+                  autoFocus
+                  placeholder="Enter Batch ID"
+                  style={compactInputStyle}
+                />
+              </div>
 
-              <input
-                type="number"
-                placeholder="Job Qty"
-                value={jobQty}
-                onChange={(e) => setJobQty(e.target.value)}
-                style={{
-                  ...commonInputStyle,
-                  marginBottom: 22,
-                }}
-              />
+              {/* Job Qty */}
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ color: "#94a3b8", display: "block", marginBottom: 6, fontWeight: "bold", fontSize: 18 }}>Job Qty:</label>
+                <input
+                  type="number"
+                  placeholder="Job Qty"
+                  value={jobQty}
+                  onChange={(e) => setJobQty(e.target.value)}
+                  style={compactInputStyle}
+                />
+              </div>
 
-              <button
-                type="button"
-                onClick={() => {
-                  if (!tempBatchId) {
-                    alert("Enter Batch ID");
-                    return;
-                  }
+              {/* Store Location */}
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ color: "#94a3b8", display: "block", marginBottom: 6, fontWeight: "bold", fontSize: 18 }}>Store Location:</label>
+                <select
+                  value={jobLocation}
+                  onChange={(e) => {
+                    setJobLocation(e.target.value);
+                    setSprayingBooth(""); // reset booth on location change
+                  }}
+                  style={compactInputStyle}
+                >
+                  <option value="">Select Location</option>
+                  <option value="B-37">B-37</option>
+                  <option value="C-20/4">C-20/4</option>
+                </select>
+              </div>
 
-                  if (!jobQty) {
-                    alert("Enter Job Qty");
-                    return;
-                  }
+              {/* Spraying Booth */}
+              {(jobLocation === "B-37" || jobLocation === "C-20/4") && (
+                <div style={{ marginBottom: 14 }}>
+                  <label style={{ color: "#94a3b8", display: "block", marginBottom: 6, fontWeight: "bold", fontSize: 18 }}>Spraying Booth:</label>
+                  <select
+                    value={sprayingBooth}
+                    onChange={(e) => setSprayingBooth(e.target.value)}
+                    style={compactInputStyle}
+                  >
+                    <option value="">Select Booth</option>
+                    {jobLocation === "B-37" ? (
+                      <>
+                        <option value="Booth 4">Booth 4</option>
+                        <option value="Booth 5">Booth 5</option>
+                      </>
+                    ) : (
+                      <>
+                        <option value="Booth 1">Booth 1</option>
+                        <option value="Booth 2">Booth 2</option>
+                        <option value="Booth 3">Booth 3</option>
+                      </>
+                    )}
+                  </select>
+                </div>
+              )}
 
-                  const maxJobQty = Number(activeJob?.qty || 0);
+              {/* Operator Name */}
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ color: "#94a3b8", display: "block", marginBottom: 6, fontWeight: "bold", fontSize: 18 }}>Operator Name:</label>
+                <select
+                  value={operatorName}
+                  onChange={(e) => setOperatorName(e.target.value)}
+                  style={compactInputStyle}
+                >
+                  <option value="">Select Operator</option>
+                  {(window.parent && Array.isArray(window.parent.operators)
+                    ? window.parent.operators.map(op => op.name)
+                    : ["Laxmi", "SJ", "Aryan", "Venkatesh"]
+                  ).map(op => (
+                    <option key={op} value={op}>{op}</option>
+                  ))}
+                  <option value="Other">Other</option>
+                </select>
+              </div>
 
-                  if (Number(jobQty) > maxJobQty) {
-                    alert("Job Qty cannot exceed available Qty");
-                    return;
-                  }
+              {/* Custom Operator Name */}
+              {operatorName === "Other" && (
+                <div style={{ marginBottom: 20 }}>
+                  <label style={{ color: "#94a3b8", display: "block", marginBottom: 6, fontWeight: "bold", fontSize: 18 }}>Custom Operator Name:</label>
+                  <input
+                    value={customOperatorName}
+                    onChange={(e) => setCustomOperatorName(e.target.value)}
+                    placeholder="Enter Custom Operator Name"
+                    style={compactInputStyle}
+                  />
+                </div>
+              )}
 
-                  const now = Date.now();
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginTop: 24 }}>
+                <button
+                  type="button"
+                  onClick={() => setShowBatchModal(false)}
+                  style={{
+                    width: "100%",
+                    height: 70,
+                    borderRadius: 18,
+                    border: "2px solid #64748b",
+                    background: "#334155",
+                    color: "white",
+                    fontSize: 22,
+                    fontWeight: 900,
+                    cursor: "pointer",
+                  }}
+                >
+                  CANCEL
+                </button>
 
-                  setBatchId(tempBatchId);
-                  setShowBatchModal(false);
-                  setOpenFinishedJobId(null);
-                  cycleBaseRef.current = 0;
-                  segmentStartRef.current = now;
-                  setCycleSeconds(0);
-                  setAppState("RUNNING");
-
-                  setRunningJobs((prev) => {
-                    const exists = prev.some((item) => item.id === activeJob.id);
-
-                    if (exists) {
-                      return prev.map((item) =>
-                        item.id === activeJob.id
-                          ? {
-                              ...item,
-                              startTime: now,
-                              cycleStartTime: now,
-                              cycleBaseSeconds: 0,
-                              cycleSeconds: 0,
-                            }
-                          : item
-                      );
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!tempBatchId) {
+                      alert("Enter Batch ID");
+                      return;
                     }
 
-                    return [
-                      ...prev,
-                      {
-                        ...activeJob,
-                        startTime: now,
-                        cycleStartTime: now,
-                        cycleBaseSeconds: 0,
-                        cycleSeconds: 0,
+                    if (!jobQty) {
+                      alert("Enter Job Qty");
+                      return;
+                    }
+
+                    const maxJobQty = Number(activeJob?.qty || 0);
+
+                    if (Number(jobQty) > maxJobQty) {
+                      alert("Job Qty cannot exceed available Qty");
+                      return;
+                    }
+
+                    if (!jobLocation) {
+                      alert("Select Store Location");
+                      return;
+                    }
+
+                    if (!sprayingBooth) {
+                      alert("Select Spraying Booth");
+                      return;
+                    }
+
+                    if (!operatorName) {
+                      alert("Select Operator Name");
+                      return;
+                    }
+
+                    if (operatorName === "Other" && !customOperatorName.trim()) {
+                      alert("Enter Custom Operator Name");
+                      return;
+                    }
+
+                    const chosenOperator = operatorName === "Other" ? customOperatorName.trim() : operatorName;
+                    const now = Date.now();
+
+                    // Save location immediately to Firestore
+                    fetch(scriptUrl, {
+                      method: "POST",
+                      headers: {
+                        "Content-Type": "text/plain",
                       },
-                    ];
-                  });
-                }}
-                style={{
-                  width: "100%",
-                  height: 84,
-                  borderRadius: 20,
-                  border: "none",
-                  background: "#2563eb",
-                  color: "white",
-                  fontSize: "clamp(28px, 3vw, 34px)",
-                  fontWeight: 900,
-                  cursor: "pointer",
-                }}
-              >
-                START CYCLE
-              </button>
+                      body: JSON.stringify({
+                        type: "MATERIAL_LOCATION",
+                        jobId: activeJob.id,
+                        part: activeJob.part,
+                        qty: activeJob.qty,
+                        location: jobLocation,
+                      }),
+                    }).catch(err => {
+                      console.error("Failed to save location immediately:", err);
+                    });
+
+                    setBatchId(tempBatchId);
+                    setShowBatchModal(false);
+                    setOpenFinishedJobId(null);
+                    cycleBaseRef.current = 0;
+                    segmentStartRef.current = now;
+                    setCycleSeconds(0);
+                    setAppState("RUNNING");
+
+                    const runningJobData = {
+                      ...activeJob,
+                      location: jobLocation,
+                      operatorName: chosenOperator,
+                      sprayingBooth: sprayingBooth,
+                      batchId: tempBatchId,
+                      qty: Number(jobQty),
+                      startTime: now,
+                      cycleStartTime: now,
+                      cycleBaseSeconds: 0,
+                      cycleSeconds: 0,
+                    };
+
+                    setRunningJobs((prev) => {
+                      const exists = prev.some((item) => item.id === activeJob.id);
+
+                      if (exists) {
+                        return prev.map((item) =>
+                          item.id === activeJob.id ? runningJobData : item
+                        );
+                      }
+
+                      return [...prev, runningJobData];
+                    });
+                  }}
+                  style={{
+                    width: "100%",
+                    height: 70,
+                    borderRadius: 18,
+                    border: "none",
+                    background: "#2563eb",
+                    color: "white",
+                    fontSize: 22,
+                    fontWeight: 900,
+                    cursor: "pointer",
+                  }}
+                >
+                  START CYCLE
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -1231,6 +1209,21 @@ export default function SprayBoothDashboard() {
                         }}
                       >
                         Qty: {renderQuantity(job.qty, job.qtyHistory)}
+                      </div>
+                      
+                      <div
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 6,
+                          marginBottom: 16,
+                          fontSize: 16,
+                          color: "#cbd5e1"
+                        }}
+                      >
+                        <div><strong style={{ color: "white" }}>Location:</strong> {job.location || "-"}</div>
+                        {job.sprayingBooth && <div><strong style={{ color: "white" }}>Booth:</strong> {job.sprayingBooth}</div>}
+                        {job.operatorName && <div><strong style={{ color: "white" }}>Operator:</strong> {job.operatorName}</div>}
                       </div>
                       {job.splitRemark && (
                         <div

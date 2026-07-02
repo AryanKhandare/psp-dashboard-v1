@@ -153,20 +153,22 @@
                       finalSize: data.finalSize || "",
                       powderConsumed: data.powderConsumed || "",
                       location: data.location || "",
+                      operatorName: data.operatorName || "",
+                      sprayingBooth: data.sprayingBooth || "",
                       durationMs: (data.cycleSeconds || 0) * 1000
                     };
                     payload = window.parent.splitJobAndProgress(
                       localJob,
                       doneQty,
                       next,
-                      "Spraying Operator",
+                      data.operatorName || "Spraying Operator",
                       "Spraying",
                       stageData
                     );
                   }
                 } else {
                   if (window.parent.transitionToStage) {
-                    window.parent.transitionToStage(localJob, next, "Spraying Operator");
+                    window.parent.transitionToStage(localJob, next, data.operatorName || "Spraying Operator");
                   } else {
                     localJob.currentDepartment = next;
                     localJob.status = "Pending";
@@ -186,7 +188,9 @@
                     finalThickness: data.finalThickness || "",
                     finalSize: data.finalSize || "",
                     powderConsumed: data.powderConsumed || "",
-                    location: data.location || ""
+                    location: data.location || "",
+                    operatorName: data.operatorName || "",
+                    sprayingBooth: data.sprayingBooth || ""
                   };
                 }
 
@@ -316,7 +320,7 @@
     // ── DYNAMIC REACT LOADER & TRANSPILER ─────────────────────────────────────
     async function initReactDashboard() {
       try {
-        const response = await fetch('spraying_frontend.js');
+        const response = await fetch('spraying_frontend.js?t=' + Date.now());
         if (!response.ok) throw new Error("Failed to load spraying_frontend.js");
         let code = await response.text();
 
