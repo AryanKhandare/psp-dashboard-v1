@@ -1,6 +1,33 @@
 // App State Variables
 let jobs = [];
 
+// Zoho Redesign state and search helper
+window.globalSearchQuery = '';
+window.overviewViewMode = 'list';
+
+function getFilteredJobs(list) {
+  if (!window.globalSearchQuery) return list;
+  return list.filter(j => {
+    const kp = (j.kpNumber || "").toLowerCase();
+    const jc = (typeof getJobJcNo === 'function') ? getJobJcNo(j) : "";
+    const jcStr = jc ? String(jc).toLowerCase() : "";
+    const part = (j.partName || "").toLowerCase();
+    const cust = (j.customer || "").toLowerCase();
+    const op = (j.operatorName || "").toLowerCase();
+    const status = (j.status || "").toLowerCase();
+    const dept = (j.currentDepartment || "").toLowerCase();
+    
+    return kp.includes(window.globalSearchQuery) || 
+           jcStr.includes(window.globalSearchQuery) || 
+           part.includes(window.globalSearchQuery) || 
+           cust.includes(window.globalSearchQuery) ||
+           op.includes(window.globalSearchQuery) ||
+           status.includes(window.globalSearchQuery) ||
+           dept.includes(window.globalSearchQuery);
+  });
+}
+window.getFilteredJobs = getFilteredJobs;
+
 // Helper functions for KP cleaning and quantity splitting/history
 function getCleanKpNumber(kp) {
   if (!kp) return "";
@@ -1237,28 +1264,28 @@ const ROLE_PERMISSIONS = {
   super_admin: [
     'tab-overview', 'tab-inspection', 'tab-masking', 'tab-spraying', 
     'tab-grinding', 'tab-polishing', 'tab-final-inspection', 'tab-dispatch', 
-    'tab-audit-logs', 'tab-user-management', 'tab-data-management'
+    'tab-audit-logs', 'tab-user-management', 'tab-data-management', 'tab-reports'
   ],
   production_admin: [
     'tab-overview', 'tab-inspection', 'tab-masking', 'tab-spraying', 
-    'tab-grinding', 'tab-polishing', 'tab-final-inspection', 'tab-dispatch', 'tab-data-management'
+    'tab-grinding', 'tab-polishing', 'tab-final-inspection', 'tab-dispatch', 'tab-data-management', 'tab-reports'
   ],
   it_team: [
-    'tab-overview', 'tab-data-management'
+    'tab-overview', 'tab-data-management', 'tab-reports'
   ],
   hr_admin: [
     'tab-overview', 'tab-inspection', 'tab-masking', 'tab-spraying', 
-    'tab-grinding', 'tab-polishing', 'tab-final-inspection', 'tab-dispatch'
+    'tab-grinding', 'tab-polishing', 'tab-final-inspection', 'tab-dispatch', 'tab-reports'
   ],
   quality_admin: [
-    'tab-overview', 'tab-inspection', 'tab-final-inspection'
+    'tab-overview', 'tab-inspection', 'tab-final-inspection', 'tab-reports'
   ],
   operator: {
-    Masking: ['tab-masking'],
-    Spraying: ['tab-spraying'],
-    Grinding: ['tab-grinding'],
-    Polishing: ['tab-polishing'],
-    Inspection: ['tab-inspection']
+    Masking: ['tab-masking', 'tab-reports'],
+    Spraying: ['tab-spraying', 'tab-reports'],
+    Grinding: ['tab-grinding', 'tab-reports'],
+    Polishing: ['tab-polishing', 'tab-reports'],
+    Inspection: ['tab-inspection', 'tab-reports']
   }
 };
 
@@ -1336,6 +1363,41 @@ async function initApp() {
   populateHeaderUser();
   applySidebarPermissions();
   
+  // Setup Zoho View Selector
+  const btnViewList = document.getElementById("btn-view-list");
+  const btnViewKanban = document.getElementById("btn-view-kanban");
+  if (btnViewList && btnViewKanban) {
+    btnViewList.addEventListener("click", () => {
+      window.overviewViewMode = 'list';
+      btnViewList.classList.add("active");
+      btnViewKanban.classList.remove("active");
+      const listPanel = document.getElementById("overview-list-view-panel");
+      const kanbanPanel = document.getElementById("overview-kanban-board-panel");
+      if (listPanel) listPanel.style.display = "block";
+      if (kanbanPanel) kanbanPanel.style.display = "none";
+      renderAll();
+    });
+    btnViewKanban.addEventListener("click", () => {
+      window.overviewViewMode = 'kanban';
+      btnViewKanban.classList.add("active");
+      btnViewList.classList.remove("active");
+      const listPanel = document.getElementById("overview-list-view-panel");
+      const kanbanPanel = document.getElementById("overview-kanban-board-panel");
+      if (listPanel) listPanel.style.display = "none";
+      if (kanbanPanel) kanbanPanel.style.display = "block";
+      renderAll();
+    });
+  }
+
+  // Setup Zoho Global Search Input
+  const globalSearchInput = document.getElementById("global-search-input");
+  if (globalSearchInput) {
+    globalSearchInput.addEventListener("input", (e) => {
+      window.globalSearchQuery = e.target.value.trim().toLowerCase();
+      renderAll();
+    });
+  }
+  
   // Set up Hash Router triggers
   window.addEventListener("hashchange", handleRouting);
   // Run initial routing on startup (silently redirecting to authorized default)
@@ -1401,6 +1463,7 @@ async function initApp() {
     startStateTimer();
     setupEventListeners();
     setupDmdEventListeners(); // Setup DMD dynamic subtab events
+    initTransitionDragHandlers();
     startAutoRefresh();
 
     // Live update: Poll Google Sheet for new KP numbers periodically (configured to 10 minutes)
@@ -1590,6 +1653,7 @@ async function sendBackendPost(payload) {
       if (nextStage !== "Dispatched") {
         const nextStageData = jobData[nextStageKey] || { status: "Pending" };
         nextStageData.status = "Pending";
+        nextStageData.queueEntryTime = new Date().toISOString();
         updates[nextStageKey] = nextStageData;
       }
       
@@ -1604,6 +1668,41 @@ async function sendBackendPost(payload) {
         read: false
       });
       
+      return { success: true };
+    }
+
+    // 4.5. APPROVE JOB (From Inspection stage)
+    if (reqType === "APPROVE_JOB" || reqType === "APPROVEJOB") {
+      if (!jobRef) throw new Error(`Job ${payload.kpNo} not found`);
+
+      const nextStage = payload.nextStage || "Masking";
+      const nextStageKey = nextStage.toLowerCase().replace(/[^a-z]/g, "");
+
+      const inspectionData = jobData.inspection || { status: "Pending" };
+      inspectionData.status = "Completed";
+      inspectionData.endTime = new Date().toISOString();
+      inspectionData.startTime = inspectionData.startTime || jobData.createdDate?.toDate?.()?.toISOString() || new Date().toISOString();
+      inspectionData.operatorName = payload.operatorName || "";
+
+      const updates = {
+        currentStage: nextStage,
+        currentStatus: "Pending",
+        assignedOperator: null,
+        shift: "",
+        lastUpdated: firebase.firestore.FieldValue.serverTimestamp(),
+        inspection: inspectionData
+      };
+
+      if (nextStage !== "Dispatched") {
+        const nextStageData = jobData[nextStageKey] || { status: "Pending" };
+        nextStageData.status = "Pending";
+        nextStageData.queueEntryTime = new Date().toISOString();
+        updates[nextStageKey] = nextStageData;
+      }
+
+      await jobRef.update(updates);
+
+      await createFirestoreAuditLog(payload.operatorName, "Inspection", payload.kpNo, "Cycle Ended", `Approved & Pushed job from Inspection to ${nextStage}`);
       return { success: true };
     }
     
@@ -1702,6 +1801,7 @@ async function sendBackendPost(payload) {
         createdDate: firebase.firestore.FieldValue.serverTimestamp(),
         createdBy: currentUser?.email || "System",
         lastUpdated: firebase.firestore.FieldValue.serverTimestamp(),
+        inspection: { status: "Pending", queueEntryTime: new Date().toISOString() },
         masking: { status: "Pending", materials: [], holdHistory: [] },
         spraying: { status: "Pending" },
         grinding: { status: "Pending", holdHistory: [] },
@@ -1767,7 +1867,10 @@ async function sendBackendPost(payload) {
       };
       
       const nextStageKeyName = nextStage.toLowerCase().replace(/[^a-z]/g, "");
-      updates[nextStageKeyName] = { status: "Pending" };
+      updates[nextStageKeyName] = { 
+        status: "Pending",
+        queueEntryTime: new Date().toISOString()
+      };
       
       await jobRef.update(updates);
       await createFirestoreAuditLog(payload.operatorName, "Masking", payload.kpNo, "No Masking Required", `Bypassed masking (Reason: ${payload.reason || "N/A"}), routed to ${nextStage}`);
@@ -1999,6 +2102,7 @@ function startFirestoreListeners() {
           storeLocation: data.storeLocation || "",
           qtyHistory: data.qtyHistory || [],
           splitRemark: data.splitRemark || "",
+          inspection: data.inspection || { status: "Pending" },
           masking: data.masking || { status: "Pending", materials: [], holdHistory: [] },
           spraying: data.spraying || { status: "Pending" },
           grinding: data.grinding || { status: "Pending", holdHistory: [] },
@@ -2478,9 +2582,15 @@ function switchToSubtab(subtabId) {
 }
 
 function populateHeaderUser() {
-  const display = document.getElementById("header-user-display");
-  if (display && currentUser) {
-    display.textContent = `${currentUser.email} (${currentUser.role.replace('_', ' ').toUpperCase()})`;
+  const display = document.getElementById("sidebar-user-display");
+  const roleDisplay = document.getElementById("sidebar-user-role-display");
+  const avatarChar = document.getElementById("sidebar-avatar-char");
+  
+  if (currentUser) {
+    const cleanName = currentUser.name || currentUser.email.split('@')[0];
+    if (display) display.textContent = cleanName;
+    if (roleDisplay) roleDisplay.textContent = currentUser.role.replace('_', ' ').toUpperCase();
+    if (avatarChar) avatarChar.textContent = cleanName.charAt(0).toUpperCase();
   }
 }
 
@@ -2488,7 +2598,7 @@ function populateHeaderUser() {
 function getLoggedUser() {
   return {
     name: currentUser ? currentUser.email : "System Operator",
-    shift: shiftSelect.value || "A Shift",
+    shift: (shiftSelect && shiftSelect.value) || "A Shift",
     role: currentUser ? currentUser.role : "System",
     department: currentUser ? currentUser.department : "System"
   };
@@ -2791,6 +2901,14 @@ function renderAll() {
   renderAuditLogs();
   renderDmdDashboard();
 
+  // Render weekly performance reports if active
+  const reportsTab = document.getElementById("tab-reports");
+  if (reportsTab && reportsTab.classList.contains("active")) {
+    if (typeof initReportsTab === "function") {
+      initReportsTab();
+    }
+  }
+
   // Update OEE UI immediately
   ["Masking", "Spraying", "Grinding", "Polishing"].forEach(dept => {
     const state = loadOeeState(dept);
@@ -2808,15 +2926,17 @@ function updateSidebarCounts() {
   const countFinal = jobs.filter(j => j.currentDepartment === "Final Inspection").length;
   const countDispatch = jobs.filter(j => j.currentDepartment === "Dispatch").length;
 
-  if (badgeInspection) badgeInspection.textContent = countInspect;
-  if (badgeMasking) badgeMasking.textContent = countMasking;
-  if (badgeSpraying) badgeSpraying.textContent = countSpraying;
-  
+  const badgeInspection = document.getElementById("badge-count-inspection");
+  const badgeMasking = document.getElementById("badge-count-masking");
+  const badgeSpraying = document.getElementById("badge-count-spraying");
   const badgeGrinding = document.getElementById("badge-count-grinding");
   const badgePolishing = document.getElementById("badge-count-polishing");
   const badgeFinal = document.getElementById("badge-count-final-inspection");
   const badgeDispatch = document.getElementById("badge-count-dispatch");
-  
+
+  if (badgeInspection) badgeInspection.textContent = countInspect;
+  if (badgeMasking) badgeMasking.textContent = countMasking;
+  if (badgeSpraying) badgeSpraying.textContent = countSpraying;
   if (badgeGrinding) badgeGrinding.textContent = countGrinding;
   if (badgePolishing) badgePolishing.textContent = countPolishing;
   if (badgeFinal) badgeFinal.textContent = countFinal;
@@ -2869,10 +2989,13 @@ function renderWorkflowOverview() {
     }
   });
 
+  // Filter jobs list for table & Kanban views
+  const filteredJobs = getFilteredJobs(jobs);
+
   const tbody = document.getElementById("overview-jobs-list");
   tbody.innerHTML = "";
 
-  jobs.forEach(job => {
+  filteredJobs.forEach(job => {
     const tr = document.createElement("tr");
     
     let priorityClass = "";
@@ -2898,7 +3021,185 @@ function renderWorkflowOverview() {
     `;
     tbody.appendChild(tr);
   });
+
+  // Render secondary Zoho Project views
+  renderGanttTimeline();
+  renderKanbanBoard(filteredJobs);
 }
+
+function renderGanttTimeline() {
+  const container = document.getElementById("production-gantt-timeline");
+  if (!container) return;
+  
+  const machines = [
+    { id: "amba", name: "Amba (Grinding)", dept: "Grinding" },
+    { id: "hmt", name: "HMT G17 (Grinding)", dept: "Grinding" },
+    { id: "kirloskar", name: "Kirloskar MC.28 (Grinding)", dept: "Grinding" },
+    { id: "zanetti", name: "Zanetti Toss (Grinding)", dept: "Grinding" },
+    { id: "b-37", name: "Booth B-37 (Spraying)", dept: "Spraying" },
+    { id: "c-20", name: "Booth C-20/4 (Spraying)", dept: "Spraying" },
+    { id: "masking", name: "Masking Workbench", dept: "Masking" }
+  ];
+  
+  let html = `
+    <div class="gantt-chart-container">
+      <div class="gantt-header-row">
+        <div class="gantt-label-col">Resource / Machine</div>
+        <div>08:00</div>
+        <div>09:00</div>
+        <div>10:00</div>
+        <div>11:00</div>
+        <div>12:00</div>
+        <div>13:00</div>
+        <div>14:00</div>
+        <div>15:00</div>
+        <div>16:00</div>
+        <div>17:00</div>
+        <div>18:00</div>
+        <div>19:00</div>
+      </div>
+  `;
+  
+  machines.forEach(res => {
+    let activeJob = null;
+    if (res.dept === "Grinding") {
+      activeJob = jobs.find(j => j.currentDepartment === "Grinding" && j.grinding?.status === "In Progress" && String(j.grinding?.machineName || "").toLowerCase().includes(res.id));
+    } else if (res.dept === "Spraying") {
+      activeJob = jobs.find(j => j.currentDepartment === "Spraying" && j.spraying?.status === "In Progress" && String(j.spraying?.booth || "").toLowerCase().includes(res.id));
+    } else if (res.dept === "Masking") {
+      activeJob = jobs.find(j => j.currentDepartment === "Masking" && j.masking?.status === "In Progress");
+    }
+    
+    html += `
+      <div class="gantt-row">
+        <div class="gantt-label-col">${res.name}</div>
+        <div class="gantt-timeline-cells">
+    `;
+    
+    if (activeJob) {
+      const kp = activeJob.kpNumber;
+      const jc = getJobJcNo(activeJob);
+      const label = `${kp}${jc ? ` (${jc})` : ""}`;
+      const isHold = activeJob.status === "Hold" || (activeJob.spraying?.status === "Hold");
+      const barClass = isHold ? "gantt-bar-item hold" : "gantt-bar-item";
+      
+      html += `
+        <div class="${barClass}" style="left: 15%; width: 70%;" onclick="window.location.hash = '#tab-${res.dept.toLowerCase()}'">
+          ${label} - In Progress (${activeJob.operatorName || "Unassigned"})
+        </div>
+      `;
+    } else {
+      html += `<div class="gantt-no-data">Resource Idle / Available</div>`;
+    }
+    
+    html += `
+        </div>
+      </div>
+    `;
+  });
+  
+  html += `</div>`;
+  container.innerHTML = html;
+}
+
+function renderKanbanBoard(filteredJobs) {
+  const container = document.getElementById("overview-kanban-board");
+  if (!container) return;
+  
+  const columns = [
+    { title: "Inspection", stages: ["Inspection"] },
+    { title: "Masking", stages: ["Masking"] },
+    { title: "Spraying", stages: ["Spraying"] },
+    { title: "Grinding & Polishing", stages: ["Grinding", "Polishing"] },
+    { title: "Final QA & Dispatch", stages: ["Final Inspection", "Dispatch"] }
+  ];
+  
+  container.innerHTML = "";
+  
+  columns.forEach(col => {
+    const columnJobs = filteredJobs.filter(j => col.stages.includes(j.currentDepartment));
+    
+    const colDiv = document.createElement("div");
+    colDiv.className = "kanban-column";
+    colDiv.id = `kanban-col-${col.title.replace(/\s+/g, '-').toLowerCase()}`;
+    
+    colDiv.setAttribute("ondragover", "event.preventDefault(); this.classList.add('drag-over')");
+    colDiv.setAttribute("ondragleave", "this.classList.remove('drag-over')");
+    colDiv.setAttribute("ondrop", `handleKanbanDrop(event, '${col.stages[0]}'); this.classList.remove('drag-over')`);
+    
+    colDiv.innerHTML = `
+      <div class="kanban-column-header">
+        <span class="kanban-column-title">${col.title}</span>
+        <span class="kanban-column-count">${columnJobs.length}</span>
+      </div>
+      <div class="kanban-column-body"></div>
+    `;
+    
+    const body = colDiv.querySelector(".kanban-column-body");
+    
+    columnJobs.forEach(job => {
+      const card = document.createElement("div");
+      card.className = "kanban-card";
+      card.draggable = true;
+      card.addEventListener("dragstart", (e) => {
+        e.dataTransfer.setData("text/plain", job.kpNumber);
+        card.classList.add("dragging");
+      });
+      card.addEventListener("dragend", () => {
+        card.classList.remove("dragging");
+      });
+      
+      const priorityClass = String(job.priority || "Normal").toLowerCase();
+      const cleanJc = getJobJcNo(job);
+      
+      card.innerHTML = `
+        <div class="kanban-card-header">
+          <span class="kanban-card-kp">${getCleanKpNumber(job.kpNumber)}${cleanJc ? ` (${cleanJc})` : ""}</span>
+          <span class="kanban-card-priority ${priorityClass}" title="Priority: ${job.priority}"></span>
+        </div>
+        <div class="kanban-card-part">${job.partName || "No Part Name"}</div>
+        <div class="kanban-card-cust">${job.customer || "No Customer"}</div>
+        <div class="kanban-card-footer">
+          <span class="kanban-card-qty">${job.quantity} pcs</span>
+          <span class="kanban-card-status badge-${String(job.status || "pending").toLowerCase().replace(/\s+/g, '-')}">${job.status || "Pending"}</span>
+        </div>
+      `;
+      
+      card.addEventListener("click", () => {
+        const destTab = job.currentDepartment.toLowerCase().replace(/\s+/g, '-');
+        window.location.hash = `#tab-${destTab}`;
+      });
+      
+      body.appendChild(card);
+    });
+    
+    container.appendChild(colDiv);
+  });
+}
+
+async function handleKanbanDrop(event, targetStage) {
+  event.preventDefault();
+  const kpNumber = event.dataTransfer.getData("text/plain");
+  if (!kpNumber) return;
+  
+  const job = jobs.find(j => j.kpNumber === kpNumber);
+  if (!job) return;
+  
+  if (job.currentDepartment === targetStage) return;
+  
+  showToast("Kanban Router", `Directing to ${targetStage} stage for job ${kpNumber}.`, "info");
+  
+  const destTab = targetStage.toLowerCase().replace(/\s+/g, '-');
+  window.location.hash = `#tab-${destTab}`;
+  
+  setTimeout(() => {
+    alert(`Please complete the standard workflow controls for ${kpNumber} on the ${targetStage} panel.`);
+  }, 100);
+}
+
+window.renderGanttTimeline = renderGanttTimeline;
+window.renderKanbanBoard = renderKanbanBoard;
+window.handleKanbanDrop = handleKanbanDrop;
 
 // ── Global helper: transition a job to any stage ──
 function transitionToStage(job, stageName, operatorName) {
@@ -2948,43 +3249,462 @@ function transitionToStage(job, stageName, operatorName) {
   }
 }
 
-// 8. TAB VIEW: INSPECTION DASHBOARD (Simulated Job Registration & Approval)
-function renderInspectionDashboard() {
-  const tbody = document.getElementById("inspection-queue-list");
-  tbody.innerHTML = "";
+// ==================== ZOHO INTERACTIVE TRANSITION DRAG & UNDO PIPELINE ====================
+window.pendingTransition = null;
+window.undoTimerId = null;
+window.undoIntervalId = null;
+window.undoActiveState = null;
 
-  const inspectJobs = jobs.filter(j => j.currentDepartment === "Inspection");
+function showFloatingCardTransition(job, stageName, payloadGenerator, applyLocalMutation) {
+  window.pendingTransition = {
+    job: job,
+    stage: stageName,
+    payloadGenerator: payloadGenerator,
+    applyLocalMutation: applyLocalMutation
+  };
 
-  if (inspectJobs.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted">No components under active inspection.</td></tr>`;
-  } else {
-    inspectJobs.forEach(job => {
-      const tr = document.createElement("tr");
-      tr.innerHTML = `
-        <td class="font-mono font-bold text-cyan">${getCleanKpNumber(job.kpNumber)}${getJobJcNo(job) ? ` (${getJobJcNo(job)})` : ""}</td>
-        <td>${job.partName}</td>
-        <td>${job.customer}</td>
-        <td class="font-mono">${renderQuantityWithHistory(job, true)}</td>
-        <td><span class="badge badge-normal">${job.processType}</span></td>
-        <td><span class="badge badge-pending">Inspection Pending</span></td>
-        <td>
-          <select id="inspect-next-stage-${job.kpNumber}" class="form-input select-sm" style="display:inline-block; width:auto; margin-right:5px; height:30px; padding:2px 5px; font-size:12px;">
-            <option value="Inspection">Inspection</option>
-            <option value="Masking" selected>Masking</option>
-            <option value="Spraying">Spraying</option>
-            <option value="Grinding">Grinding</option>
-            <option value="Polishing">Polishing</option>
-            <option value="Final Inspection">Final Inspection</option>
-            <option value="Dispatch">Dispatch</option>
-          </select>
-          <button class="btn btn-success btn-xs" onclick="approveInspectionJob('${job.kpNumber}')">Approve Job</button>
-        </td>
-      `;
-      tbody.appendChild(tr);
+  const overlay = document.getElementById("transition-drag-overlay");
+  if (overlay) {
+    overlay.style.display = "flex";
+  }
+
+  loadFloatingCardInfo(job);
+}
+
+function loadFloatingCardInfo(job) {
+  const card = document.getElementById("floating-drag-card");
+  if (!card) return;
+
+  const cleanJc = getJobJcNo(job);
+  const priorityClass = String(job.priority || "Normal").toLowerCase();
+  
+  card.innerHTML = `
+    <div class="stage-card-priority-strip ${priorityClass}"></div>
+    <div style="margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
+      <span class="font-mono font-bold text-cyan" style="font-size: 16px;">${getCleanKpNumber(job.kpNumber)}${cleanJc ? ` (${cleanJc})` : ""}</span>
+      <span class="badge badge-normal" style="font-size:10px; font-weight:700;">${job.processType}</span>
+    </div>
+    <div style="font-size: 14px; font-weight: 600; margin-bottom: 8px;">${job.partName}</div>
+    <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">Customer: ${job.customer}</div>
+    <div style="font-size: 13px; font-weight: 700; color: var(--text-highlight);">Quantity: ${job.quantity} pcs</div>
+    <div style="font-size: 11px; margin-top: 15px; color: var(--text-muted); text-align: center; border: 1px dashed var(--border-color); padding: 8px; border-radius: 6px;">
+      DRAG ME TO THE TARGET STAGE BELOW
+    </div>
+  `;
+
+  card.classList.remove("dragging");
+  card.style.animation = "floatCenterIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards, shakeCard 1.5s ease-in-out infinite alternate";
+}
+
+function initTransitionDragHandlers() {
+  const card = document.getElementById("floating-drag-card");
+  const zones = document.querySelectorAll(".drop-target-stage");
+  const overlay = document.getElementById("transition-drag-overlay");
+
+  if (card) {
+    card.addEventListener("dragstart", (e) => {
+      e.dataTransfer.setData("text/plain", "floating-card");
+      card.classList.add("dragging");
+      card.style.animation = "none"; // Stop shaking while dragging
+    });
+    card.addEventListener("dragend", () => {
+      card.classList.remove("dragging");
+      if (!window.pendingTransition && overlay) {
+        overlay.style.display = "none";
+      } else {
+        card.style.animation = "shakeCard 1.5s ease-in-out infinite alternate";
+      }
     });
   }
 
-  // Render Admin Workload tracking panel if admin is logged in
+  zones.forEach(zone => {
+    zone.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      zone.classList.add("drag-active");
+    });
+    zone.addEventListener("dragleave", () => {
+      zone.classList.remove("drag-active");
+    });
+    zone.addEventListener("drop", (e) => {
+      e.preventDefault();
+      zone.classList.remove("drag-active");
+      const targetStage = zone.getAttribute("data-target-stage");
+      if (window.pendingTransition && targetStage) {
+        applyStageTransitionWithUndo(targetStage);
+      }
+    });
+    // Support mobile/touch tap fallback
+    zone.addEventListener("click", () => {
+      const targetStage = zone.getAttribute("data-target-stage");
+      if (window.pendingTransition && targetStage) {
+        applyStageTransitionWithUndo(targetStage);
+      }
+    });
+  });
+
+  const undoBtn = document.getElementById("btn-global-undo");
+  if (undoBtn) {
+    undoBtn.addEventListener("click", triggerUndoLastTransition);
+  }
+}
+
+function isBackwardTransition(currentStage, targetStage) {
+  const STAGE_ORDER = ["Inspection", "Masking", "Spraying", "Grinding", "Polishing", "Final Inspection", "Dispatch", "Dispatched", "Completed"];
+  const currIdx = STAGE_ORDER.indexOf(currentStage);
+  const targetIdx = STAGE_ORDER.indexOf(targetStage);
+  if (currIdx === -1 || targetIdx === -1) return false;
+  return targetIdx < currIdx;
+}
+
+function applyStageTransitionWithUndo(targetStage) {
+  if (!window.pendingTransition) return;
+  const trans = window.pendingTransition;
+  const currentStage = trans.stage;
+
+  if (isBackwardTransition(currentStage, targetStage)) {
+    // Hide drag overlay temporarily
+    const dragOverlay = document.getElementById("transition-drag-overlay");
+    if (dragOverlay) dragOverlay.style.display = "none";
+
+    // Show rework reason modal
+    const reworkModal = document.getElementById("modal-rework-reason");
+    const fromEl = document.getElementById("rework-from-stage");
+    const toEl = document.getElementById("rework-to-stage");
+    if (fromEl) fromEl.textContent = currentStage;
+    if (toEl) toEl.textContent = targetStage;
+    
+    // Reset form values
+    const form = document.getElementById("rework-reason-form");
+    const select = document.getElementById("rework-reason-select");
+    const comments = document.getElementById("rework-custom-input");
+    if (select) select.value = "";
+    if (comments) comments.value = "";
+    
+    if (reworkModal) reworkModal.style.display = "flex";
+
+    // Setup Cancel button handler
+    const cancelBtn = document.getElementById("btn-cancel-rework");
+    const handleCancel = () => {
+      reworkModal.style.display = "none";
+      if (dragOverlay) dragOverlay.style.display = "flex";
+      cancelBtn.removeEventListener("click", handleCancel);
+      form.removeEventListener("submit", handleSubmit);
+    };
+    cancelBtn.addEventListener("click", handleCancel);
+
+    // Setup Submit handler
+    const handleSubmit = (e) => {
+      e.preventDefault();
+      const reasonVal = select.value;
+      const commentsVal = comments.value;
+      
+      reworkModal.style.display = "none";
+      cancelBtn.removeEventListener("click", handleCancel);
+      form.removeEventListener("submit", handleSubmit);
+      
+      // Continue transition with enriched payload parameters
+      executeStageTransition(targetStage, reasonVal, commentsVal);
+    };
+    form.addEventListener("submit", handleSubmit);
+
+    return; // Break normal flow to await form submission
+  }
+
+  // Normal Forward Flow
+  executeStageTransition(targetStage);
+}
+
+function executeStageTransition(targetStage, reworkReason = null, reworkComments = null) {
+  if (!window.pendingTransition) return;
+  const trans = window.pendingTransition;
+
+  // Save the pre-transition state of jobs
+  window.undoActiveState = JSON.parse(JSON.stringify(jobs));
+
+  // Apply local mutation
+  trans.applyLocalMutation(targetStage);
+
+  // Generate payload
+  const payload = trans.payloadGenerator(targetStage);
+  if (payload) {
+    if (reworkReason) payload.reworkReasonCategory = reworkReason;
+    if (reworkComments) payload.reworkReasonComments = reworkComments;
+  }
+
+  // Hide floating overlay
+  const overlay = document.getElementById("transition-drag-overlay");
+  if (overlay) overlay.style.display = "none";
+
+  window.pendingTransition = null;
+  renderAll();
+
+  // Trigger the 10-second undo countdown banner
+  startUndoCountdown(payload);
+}
+
+function startUndoCountdown(payload) {
+  const banner = document.getElementById("undo-countdown-banner");
+  const secondsEl = document.getElementById("undo-timer-seconds");
+  const fillEl = document.getElementById("undo-progress-fill");
+  if (!banner) return;
+
+  if (window.undoTimerId) clearTimeout(window.undoTimerId);
+  if (window.undoIntervalId) clearInterval(window.undoIntervalId);
+
+  let timeLeft = 10;
+  secondsEl.textContent = timeLeft;
+  fillEl.style.width = "100%";
+  banner.style.display = "flex";
+
+  // Tick the progress fill and seconds
+  window.undoIntervalId = setInterval(() => {
+    timeLeft--;
+    if (timeLeft >= 0) {
+      secondsEl.textContent = timeLeft;
+      fillEl.style.width = `${timeLeft * 10}%`;
+    }
+  }, 1000);
+
+  // Commit on timeout
+  window.undoTimerId = setTimeout(async () => {
+    clearInterval(window.undoIntervalId);
+    banner.style.display = "none";
+    window.undoTimerId = null;
+    window.undoIntervalId = null;
+    window.undoActiveState = null;
+
+    // Permanent Save & Server Sync
+    try {
+      if (!isMockMode() && sendBackendPost && payload) {
+        await sendBackendPost(payload);
+      }
+      let logMsg = `Job routed to next stage: ${payload.nextStage}`;
+      if (payload.reworkReasonCategory) {
+        logMsg = `Job sent back to previous stage: ${payload.nextStage}. Reason Category: ${payload.reworkReasonCategory}. Comments: ${payload.reworkReasonComments || "None"}`;
+      }
+      await createFirestoreAuditLog(
+        payload.operatorName || getLoggedUser().name,
+        payload.stage || "System",
+        payload.kpNo,
+        payload.reworkReasonCategory ? "Rework Pushback" : "Stage Transition",
+        logMsg
+      );
+      saveState();
+      renderAll();
+    } catch (err) {
+      console.error("Failed to sync stage transition:", err);
+    }
+  }, 10000);
+}
+
+function triggerUndoLastTransition() {
+  if (window.undoTimerId) clearTimeout(window.undoTimerId);
+  if (window.undoIntervalId) clearInterval(window.undoIntervalId);
+  
+  window.undoTimerId = null;
+  window.undoIntervalId = null;
+
+  const banner = document.getElementById("undo-countdown-banner");
+  if (banner) banner.style.display = "none";
+
+  if (window.undoActiveState) {
+    jobs = window.undoActiveState;
+    window.undoActiveState = null;
+    renderAll();
+    alert("Transition reverted successfully!");
+  }
+}
+
+// 8. TAB VIEW: INSPECTION DASHBOARD (Simulated Job Registration & Approval)
+function triggerInspectionFloatingTransition(kpNumber) {
+  const job = jobs.find(j => j.kpNumber === kpNumber);
+  if (!job) return;
+
+  const payloadGenerator = (nextStage) => {
+    return {
+      type: "APPROVE_JOB",
+      kpNo: job.kpNumber,
+      stage: "Inspection",
+      nextStage: nextStage,
+      operatorName: getLoggedUser().name,
+      time: new Date().toISOString()
+    };
+  };
+
+  const applyLocalMutation = (nextStage) => {
+    job.status = "In Progress";
+    job.currentDepartment = nextStage;
+    if (nextStage === "Masking") {
+      job.masking = job.masking || {
+        status: "Pending",
+        operatorName: "",
+        startTime: null,
+        endTime: null,
+        durationMs: 0,
+        materials: []
+      };
+    }
+  };
+
+  showFloatingCardTransition(job, "Inspection", payloadGenerator, applyLocalMutation);
+}
+
+const SUB_STATUS_ORDER = ["Intake", "Visual", "Dimensional", "Review", "Ready"];
+
+function moveInspectionSubStatus(kpNumber) {
+  const job = jobs.find(j => j.kpNumber === kpNumber);
+  if (!job) return;
+  
+  const currentSubStatus = job.inspection?.subStatus || "Intake";
+  const currentIndex = SUB_STATUS_ORDER.indexOf(currentSubStatus);
+  if (currentIndex === -1 || currentIndex === SUB_STATUS_ORDER.length - 1) return;
+  
+  const nextStatus = SUB_STATUS_ORDER[currentIndex + 1];
+  updateInspectionSubStatusLocalAndRemote(job, nextStatus);
+}
+window.moveInspectionSubStatus = moveInspectionSubStatus;
+
+async function handleInspectionKanbanDrop(event, targetStatus) {
+  event.preventDefault();
+  const kpNumber = event.dataTransfer.getData("text/plain");
+  if (!kpNumber) return;
+
+  const job = jobs.find(j => j.kpNumber === kpNumber);
+  if (!job) return;
+
+  updateInspectionSubStatusLocalAndRemote(job, targetStatus);
+}
+window.handleInspectionKanbanDrop = handleInspectionKanbanDrop;
+
+async function updateInspectionSubStatusLocalAndRemote(job, targetStatus) {
+  if (targetStatus === "Ready") {
+    triggerInspectionFloatingTransition(job.kpNumber);
+    return;
+  }
+
+  if (!job.inspection) {
+    job.inspection = { status: "Pending" };
+  }
+  job.inspection.subStatus = targetStatus;
+  
+  renderInspectionDashboard();
+
+  const isMock = !firebaseConfig.apiKey || firebaseConfig.apiKey.includes("YOUR_FIREBASE_") || localStorage.getItem("psp_auth_mock") === "true";
+  if (!isMock) {
+    try {
+      const db = firebase.firestore();
+      const snap = await db.collection("jobs").where("kpNumber", "==", job.kpNumber).get();
+      if (!snap.empty) {
+        await snap.docs[0].ref.update({
+          "inspection.subStatus": targetStatus
+        });
+      }
+    } catch (err) {
+      console.error("Firestore inspection subStatus update error:", err);
+    }
+  } else {
+    const mockDbJobs = JSON.parse(localStorage.getItem('mock_db_jobs') || '[]');
+    const idx = mockDbJobs.findIndex(j => j.kpNumber === job.kpNumber);
+    if (idx !== -1) {
+      if (!mockDbJobs[idx].inspection) mockDbJobs[idx].inspection = { status: "Pending" };
+      mockDbJobs[idx].inspection.subStatus = targetStatus;
+      localStorage.setItem('mock_db_jobs', JSON.stringify(mockDbJobs));
+    }
+  }
+
+  if (typeof showToast === 'function') {
+    showToast("Sub-Stage Updated", `${job.kpNumber} moved to ${targetStatus} stage.`, "success");
+  }
+}
+
+function renderInspectionDashboard() {
+  const cardsIntake = document.getElementById("cards-intake");
+  const cardsVisual = document.getElementById("cards-visual");
+  const cardsDimensional = document.getElementById("cards-dimensional");
+  const cardsReview = document.getElementById("cards-review");
+  const cardsReady = document.getElementById("cards-ready");
+
+  if (!cardsIntake || !cardsVisual || !cardsDimensional || !cardsReview || !cardsReady) return;
+
+  cardsIntake.innerHTML = "";
+  cardsVisual.innerHTML = "";
+  cardsDimensional.innerHTML = "";
+  cardsReview.innerHTML = "";
+  cardsReady.innerHTML = "";
+
+  const inspectJobs = jobs.filter(j => j.currentDepartment === "Inspection");
+
+  let countIntake = 0;
+  let countVisual = 0;
+  let countDimensional = 0;
+  let countReview = 0;
+  let countReady = 0;
+
+  inspectJobs.forEach(job => {
+    const subStatus = job.inspection?.subStatus || "Intake";
+    const cleanJc = getJobJcNo(job);
+    const priorityClass = String(job.priority || "Normal").toLowerCase();
+    const card = document.createElement("div");
+    card.className = "kanban-card";
+    card.draggable = true;
+
+    card.addEventListener("dragstart", (e) => {
+      e.dataTransfer.setData("text/plain", job.kpNumber);
+      card.classList.add("dragging");
+    });
+
+    card.addEventListener("dragend", () => {
+      card.classList.remove("dragging");
+    });
+
+    const jobStatus = job.status || "Pending";
+    const statusBadgeStyle = jobStatus.toLowerCase() === "completed"
+      ? "background:#10b981;color:#fff;"
+      : "background:#f97316;color:#fff;";
+
+    card.innerHTML = `
+      <div class="kanban-card-header">
+        <span class="kanban-card-kp">${getCleanKpNumber(job.kpNumber)}${cleanJc ? ` (${cleanJc})` : ""}</span>
+        <span class="kanban-card-priority ${priorityClass}" title="Priority: ${job.priority || 'Normal'}"></span>
+      </div>
+      <div class="kanban-card-part">${job.partName || "—"}</div>
+      <div class="kanban-card-cust">${job.customer || "—"}</div>
+      <div class="kanban-card-footer">
+        <span class="kanban-card-qty">${job.quantity || "—"} pcs</span>
+        <span style="font-size:10px;font-weight:700;padding:2px 10px;border-radius:4px;${statusBadgeStyle}">${jobStatus.toUpperCase()}</span>
+      </div>
+      <div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.06);">
+        ${subStatus === 'Ready'
+          ? `<button class="btn btn-success btn-xs" style="width:100%;height:28px;font-size:10px;font-weight:700;" onclick="event.stopPropagation();triggerInspectionFloatingTransition('${job.kpNumber}')">🚀 Approve &amp; Push Job</button>`
+          : `<button class="btn btn-secondary btn-xs" style="width:100%;height:28px;font-size:10px;" onclick="event.stopPropagation();moveInspectionSubStatus('${job.kpNumber}')">→ Move to Next Stage</button>`
+        }
+      </div>
+    `;
+
+    if (subStatus === "Intake") {
+      cardsIntake.appendChild(card);
+      countIntake++;
+    } else if (subStatus === "Visual") {
+      cardsVisual.appendChild(card);
+      countVisual++;
+    } else if (subStatus === "Dimensional") {
+      cardsDimensional.appendChild(card);
+      countDimensional++;
+    } else if (subStatus === "Review") {
+      cardsReview.appendChild(card);
+      countReview++;
+    } else if (subStatus === "Ready") {
+      cardsReady.appendChild(card);
+      countReady++;
+    }
+  });
+
+  document.getElementById("count-intake").textContent = countIntake;
+  document.getElementById("count-visual").textContent = countVisual;
+  document.getElementById("count-dimensional").textContent = countDimensional;
+  document.getElementById("count-review").textContent = countReview;
+  document.getElementById("count-ready").textContent = countReady;
+
   const adminPanel = document.getElementById("admin-inspection-panel");
   if (adminPanel) {
     if (currentUser && currentUser.role !== 'operator') {
@@ -3239,32 +3959,31 @@ function renderLiveJobQueue() {
 
   queueJobs.forEach(job => {
     const card = document.createElement("div");
-    card.className = "job-queue-card";
+    card.className = "stage-kanban-card";
     
     let statusClass = "badge-pending";
     if (job.masking.status === "In Progress") statusClass = "badge-progress";
     else if (job.masking.status === "Hold") statusClass = "badge-hold";
 
-    let priorityClass = "";
-    if (job.priority === "Critical") priorityClass = "text-red font-bold";
-    else if (job.priority === "High") priorityClass = "text-orange";
+    const cleanPriority = String(job.priority || "Normal").toLowerCase();
 
     let actionButton = "";
     if (job.masking.status === "Pending") {
       actionButton = `
-        <button class="btn btn-success btn-tablet-primary" onclick="openAssignModal('${job.kpNumber}')">START MASKING</button>
-        <button class="btn btn-secondary btn-tablet-secondary" style="margin-top: 10px; width: 100%; height: 50px; font-size: 14px;" onclick="openNoMaskingModal('${job.kpNumber}')">NO MASKING REQUIRED</button>
+        <button class="btn btn-success btn-xs" style="width: 100%; height: 32px;" onclick="openAssignModal('${job.kpNumber}')">START MASKING</button>
+        <button class="btn btn-secondary btn-xs" style="width: 100%; height: 32px;" onclick="openNoMaskingModal('${job.kpNumber}')">NO MASKING REQUIRED</button>
       `;
     } else {
-      actionButton = `<button class="btn btn-primary btn-tablet-primary" onclick="selectActiveJobAndSwitch('${job.kpNumber}')">VIEW STATION</button>`;
+      actionButton = `<button class="btn btn-primary btn-xs" style="width: 100%; height: 32px;" onclick="selectActiveJobAndSwitch('${job.kpNumber}')">VIEW STATION</button>`;
     }
 
     card.innerHTML = `
-      <div class="job-card-header">
-        <span class="job-card-kp">${getCleanKpNumber(job.kpNumber)}${getJobJcNo(job) ? ` (${getJobJcNo(job)})` : ""}</span>
-        <span class="badge ${statusClass}">${job.masking.status}</span>
+      <div class="stage-card-priority-strip ${cleanPriority}"></div>
+      <div class="job-card-header" style="margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+        <span class="font-mono font-bold text-cyan" style="font-size: 14px;">${getCleanKpNumber(job.kpNumber)}${getJobJcNo(job) ? ` (${getJobJcNo(job)})` : ""}</span>
+        <span class="badge ${statusClass}" style="font-size: 10px; font-weight: 700;">${job.masking.status}</span>
       </div>
-      <div class="job-card-body">
+      <div class="job-card-body" style="font-size: 12px; display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px;">
         <div class="job-card-row">
           <span class="job-card-label">Part Name:</span>
           <span class="job-card-value">${job.partName}</span>
@@ -3295,10 +4014,10 @@ function renderLiveJobQueue() {
         </div>
         <div class="job-card-row">
           <span class="job-card-label">Priority:</span>
-          <span class="job-card-value ${priorityClass}">${job.priority}</span>
+          <span class="job-card-value font-bold text-cyan">${job.priority}</span>
         </div>
       </div>
-      <div class="job-card-actions">
+      <div class="stage-card-actions" style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 10px; display: flex; flex-direction: column; gap: 8px;">
         ${actionButton}
       </div>
     `;
@@ -4243,7 +4962,7 @@ function renderSprayingLiveQueue() {
 
   sprayingJobs.forEach(job => {
     const card = document.createElement("div");
-    card.className = "job-queue-card";
+    card.className = "stage-kanban-card";
     
     let statusClass = "badge-pending";
     let statusText = "Pending";
@@ -4255,11 +4974,13 @@ function renderSprayingLiveQueue() {
       statusText = "Hold";
     }
 
+    const cleanPriority = String(job.priority || "Normal").toLowerCase();
+
     let actionButton = "";
     if (!job.spraying || job.spraying.status === "Pending") {
-      actionButton = `<button class="btn btn-success btn-tablet-primary" onclick="openSprayingAssignModal('${job.kpNumber}')">START SPRAYING</button>`;
+      actionButton = `<button class="btn btn-success btn-xs" style="width: 100%; height: 32px;" onclick="openSprayingAssignModal('${job.kpNumber}')">START SPRAYING</button>`;
     } else {
-      actionButton = `<button class="btn btn-primary btn-tablet-primary" onclick="selectActiveSprayingJobAndSwitch('${job.kpNumber}')">VIEW STATION</button>`;
+      actionButton = `<button class="btn btn-primary btn-xs" style="width: 100%; height: 32px;" onclick="selectActiveSprayingJobAndSwitch('${job.kpNumber}')">VIEW STATION</button>`;
     }
 
     const kpClean = getCleanKpNumber(job.kpNumber);
@@ -4280,11 +5001,12 @@ function renderSprayingLiveQueue() {
     ` : "";
 
     card.innerHTML = `
-      <div class="job-card-header">
-        <span class="job-card-kp">${kpClean}${jcNo ? ` (${jcNo})` : ""}</span>
-        <span class="badge ${statusClass}">${statusText}</span>
+      <div class="stage-card-priority-strip ${cleanPriority}"></div>
+      <div class="job-card-header" style="margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+        <span class="font-mono font-bold text-cyan" style="font-size: 14px;">${kpClean}${jcNo ? ` (${jcNo})` : ""}</span>
+        <span class="badge ${statusClass}" style="font-size: 10px; font-weight: 700;">${statusText}</span>
       </div>
-      <div class="job-card-body">
+      <div class="job-card-body" style="font-size: 12px; display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px;">
         <div class="job-card-row">
           <span class="job-card-label">Part Name:</span>
           <span class="job-card-value">${job.partName}</span>
@@ -4303,8 +5025,12 @@ function renderSprayingLiveQueue() {
         </div>
         ${splitRemarkHtml}
         ${assignedOpHtml}
+        <div class="job-card-row">
+          <span class="job-card-label">Priority:</span>
+          <span class="job-card-value font-bold text-cyan">${job.priority}</span>
+        </div>
       </div>
-      <div class="job-card-actions" style="margin-top: 10px; width: 100%;">
+      <div class="stage-card-actions" style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 10px; display: flex; flex-direction: column; gap: 8px;">
         ${actionButton}
       </div>
     `;
@@ -4838,7 +5564,6 @@ function endSprayingCycle() {
   newForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     const doneQty = Number(currentQtyInput.value);
-    const nextDept = currentNextSelect.value;
     const passes = Number(currentPassesInput.value);
     const temp = currentTempInput.value;
     const thickness = currentThicknessInput.value;
@@ -4867,50 +5592,44 @@ function endSprayingCycle() {
     };
 
     const isSplit = doneQty < originalQty;
-    let payload = null;
+
+    const payloadGenerator = (nextStage) => {
+      if (isSplit) {
+        return splitJobAndProgress(activeJob, doneQty, nextStage, activeJob.operatorName, "Spraying", stageData);
+      } else {
+        return {
+          type: "END_CYCLE",
+          kpNo: activeJob.kpNumber,
+          stage: "Spraying",
+          nextStage: nextStage,
+          endTime: new Date().toISOString(),
+          activeTimeMs: elapsedMs,
+          batchId: stageData.batchId,
+          processedQty: doneQty,
+          totalPasses: passes,
+          finalTemp: temp,
+          finalThickness: thickness,
+          finalSize: size,
+          powderConsumed: powder,
+          location: locationVal,
+          operatorName: activeJob.operatorName
+        };
+      }
+    };
+
+    const applyLocalMutation = (nextStage) => {
+      if (!isSplit) {
+        activeJob.spraying = activeJob.spraying || {};
+        activeJob.spraying.status = "Completed";
+        Object.assign(activeJob.spraying, stageData);
+        transitionToStage(activeJob, nextStage, activeJob.operatorName);
+      }
+    };
 
     modal.classList.remove("active");
+    selectedSprayingJobKp = null;
 
-    if (isSplit) {
-      payload = splitJobAndProgress(activeJob, doneQty, nextDept, activeJob.operatorName, "Spraying", stageData);
-    } else {
-      activeJob.spraying = activeJob.spraying || {};
-      activeJob.spraying.status = "Completed";
-      Object.assign(activeJob.spraying, stageData);
-      transitionToStage(activeJob, nextDept, activeJob.operatorName);
-      
-      payload = {
-        type: "END_CYCLE",
-        kpNo: activeJob.kpNumber,
-        stage: "Spraying",
-        nextStage: nextDept,
-        endTime: new Date().toISOString(),
-        activeTimeMs: elapsedMs,
-        batchId: stageData.batchId,
-        processedQty: doneQty,
-        totalPasses: passes,
-        finalTemp: temp,
-        finalThickness: thickness,
-        finalSize: size,
-        powderConsumed: powder,
-        location: locationVal,
-        operatorName: activeJob.operatorName
-      };
-    }
-
-    try {
-      if (!isMockMode() && sendBackendPost && payload) {
-        await sendBackendPost(payload);
-      }
-      await createFirestoreAuditLog(activeJob.operatorName, "Spraying", activeJob.kpNumber, "Cycle Ended", `Completed Spraying process, routed to ${nextDept}`);
-      
-      selectedSprayingJobKp = null;
-      saveState();
-      renderAll();
-    } catch (err) {
-      console.error("Failed to complete spraying cycle:", err);
-      alert("Error completing spraying cycle. Please try again.");
-    }
+    showFloatingCardTransition(activeJob, "Spraying", payloadGenerator, applyLocalMutation);
   });
 }
 
@@ -5591,61 +6310,42 @@ async function submitCompleteMasking(e) {
     finalActiveMs += (now.getTime() - new Date(job.masking.lastStartedAt).getTime());
   }
 
-  // Get next process from complete modal
-  const nextDept = document.getElementById("masking-complete-next-process").value || "Spraying";
+  const isSplit = doneQty < job.quantity;
+  
+  const payloadGenerator = (nextStage) => {
+    if (isSplit) {
+      return splitJobAndProgress(job, doneQty, nextStage, job.masking.operatorName || getLoggedUser().name, "Masking", {
+        materials: job.masking.materials,
+        durationMs: finalActiveMs,
+        holdHistory: job.masking.holdHistory || []
+      });
+    } else {
+      return {
+        type: "END_CYCLE",
+        kpNo: job.kpNumber,
+        stage: "Masking",
+        operatorName: job.masking.operatorName || getLoggedUser().name,
+        endTime: now.toISOString(),
+        activeTimeMs: finalActiveMs,
+        nextStage: nextStage,
+        holdHistory: job.masking.holdHistory || []
+      };
+    }
+  };
 
-  let isSplit = doneQty < job.quantity;
-  let payload = {};
-
-  if (isSplit) {
-    payload = splitJobAndProgress(job, doneQty, nextDept, job.masking.operatorName || getLoggedUser().name, "Masking", {
-      materials: job.masking.materials,
-      durationMs: finalActiveMs,
-      holdHistory: job.masking.holdHistory || []
-    });
-  } else {
-    payload = {
-      type: "END_CYCLE",
-      kpNo: selectedJobKp,
-      stage: "Masking",
-      operatorName: job.masking.operatorName || getLoggedUser().name,
-      endTime: now.toISOString(),
-      activeTimeMs: finalActiveMs,
-      nextStage: nextDept,
-      holdHistory: job.masking.holdHistory || []
-    };
-
-    // Optimistic UI mutation
-    job.masking.status = "Completed";
-    job.masking.endTime = now.toISOString();
-    job.masking.durationMs = finalActiveMs;
-    
-    transitionToStage(job, nextDept, job.masking.operatorName || getLoggedUser().name);
-  }
-
-  renderSprayingDashboard();
+  const applyLocalMutation = (nextStage) => {
+    if (!isSplit) {
+      job.masking.status = "Completed";
+      job.masking.endTime = now.toISOString();
+      job.masking.durationMs = finalActiveMs;
+      transitionToStage(job, nextStage, job.masking.operatorName || getLoggedUser().name);
+    }
+  };
 
   selectedJobKp = null;
   closeCompleteMaskingModal();
-  renderAll();
 
-  // Background sync
-  pendingSyncCount++;
-  sendBackendPost(payload)
-    .then(() => {
-      pendingSyncCount--;
-      renderSprayingDashboard();
-      if (pendingSyncCount === 0) {
-        return loadState().then(() => renderAll());
-      }
-    })
-    .catch(err => {
-      pendingSyncCount--;
-      console.error("Failed to sync completed masking cycle:", err);
-      if (pendingSyncCount === 0) {
-        return loadState().then(() => renderAll());
-      }
-    });
+  showFloatingCardTransition(job, "Masking", payloadGenerator, applyLocalMutation);
 }
 
 
@@ -5843,29 +6543,28 @@ function renderGrindingLiveQueue() {
 
   queueJobs.forEach(job => {
     const card = document.createElement("div");
-    card.className = "job-queue-card";
+    card.className = "stage-kanban-card";
     
     let statusClass = "badge-pending";
     if (job.grinding.status === "In Progress") statusClass = "badge-progress";
     else if (job.grinding.status === "Hold") statusClass = "badge-hold";
 
-    let priorityClass = "";
-    if (job.priority === "Critical") priorityClass = "text-red font-bold";
-    else if (job.priority === "High") priorityClass = "text-orange";
+    const cleanPriority = String(job.priority || "Normal").toLowerCase();
 
     let actionButton = "";
     if (job.grinding.status === "Pending") {
-      actionButton = `<button class="btn btn-success btn-tablet-primary" onclick="openStartGrindingModal('${job.kpNumber}')">START GRINDING</button>`;
+      actionButton = `<button class="btn btn-success btn-xs" style="width: 100%; height: 32px;" onclick="openStartGrindingModal('${job.kpNumber}')">START GRINDING</button>`;
     } else {
-      actionButton = `<button class="btn btn-primary btn-tablet-primary" onclick="selectActiveGrindingJobAndSwitch('${job.kpNumber}')">VIEW STATION</button>`;
+      actionButton = `<button class="btn btn-primary btn-xs" style="width: 100%; height: 32px;" onclick="selectActiveGrindingJobAndSwitch('${job.kpNumber}')">VIEW STATION</button>`;
     }
 
     card.innerHTML = `
-      <div class="job-card-header">
-        <span class="job-card-kp">${getCleanKpNumber(job.kpNumber)}${getJobJcNo(job) ? ` (${getJobJcNo(job)})` : ""}</span>
-        <span class="badge ${statusClass}">${job.grinding.status}</span>
+      <div class="stage-card-priority-strip ${cleanPriority}"></div>
+      <div class="job-card-header" style="margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+        <span class="font-mono font-bold text-cyan" style="font-size: 14px;">${getCleanKpNumber(job.kpNumber)}${getJobJcNo(job) ? ` (${getJobJcNo(job)})` : ""}</span>
+        <span class="badge ${statusClass}" style="font-size: 10px; font-weight: 700;">${job.grinding.status}</span>
       </div>
-      <div class="job-card-body">
+      <div class="job-card-body" style="font-size: 12px; display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px;">
         <div class="job-card-row">
           <span class="job-card-label">Part Name:</span>
           <span class="job-card-value">${job.partName}</span>
@@ -5902,8 +6601,12 @@ function renderGrindingLiveQueue() {
           <span class="job-card-label">Store Location:</span>
           <span class="job-card-value text-orange">${job.grinding.storeLocation || "N/A"}</span>
         </div>
+        <div class="job-card-row">
+          <span class="job-card-label">Priority:</span>
+          <span class="job-card-value font-bold text-cyan">${job.priority}</span>
+        </div>
       </div>
-      <div class="job-card-actions">
+      <div class="stage-card-actions" style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 10px; display: flex; flex-direction: column; gap: 8px;">
         ${actionButton}
       </div>
     `;
@@ -6307,7 +7010,6 @@ function endGrindingCycle() {
 function submitCompleteGrinding(e) {
   e.preventDefault();
   const kp = selectedGrindingJobKp;
-  const nextDept = document.getElementById("grinding-complete-next-process").value || "Polishing";
 
   const job = jobs.find(j => j.kpNumber === kp);
   if (job) {
@@ -6330,55 +7032,46 @@ function submitCompleteGrinding(e) {
       activeMs += (now.getTime() - new Date(job.grinding.lastStartedAt).getTime());
     }
 
-    job.grinding.status = "Completed";
-    job.grinding.endTime = now.toISOString();
-    job.grinding.durationMs = activeMs;
-    job.grinding.nextProcess = nextDept;
-
     const isSplit = doneQty < job.quantity;
-    let payload = {};
 
-    if (isSplit) {
-      payload = splitJobAndProgress(job, doneQty, nextDept, currentUser.email, "Grinding", {
-        remarks: job.grinding.remarks,
-        qualityRemarks: job.grinding.qualityRemarks,
-        notes: job.grinding.notes,
-        durationMs: activeMs
-      });
-    } else {
-      transitionToStage(job, nextDept, currentUser.email);
-      payload = {
-        type: "END_CYCLE",
-        kpNo: kp,
-        stage: "Grinding",
-        operatorName: currentUser.email,
-        endTime: now.toISOString(),
-        activeTimeMs: activeMs,
-        nextStage: nextDept,
-        remarks: job.grinding.remarks,
-        qualityRemarks: job.grinding.qualityRemarks,
-        notes: job.grinding.notes
-      };
-    }
+    const payloadGenerator = (nextStage) => {
+      if (isSplit) {
+        return splitJobAndProgress(job, doneQty, nextStage, currentUser.email, "Grinding", {
+          remarks: job.grinding.remarks,
+          qualityRemarks: job.grinding.qualityRemarks,
+          notes: job.grinding.notes,
+          durationMs: activeMs
+        });
+      } else {
+        return {
+          type: "END_CYCLE",
+          kpNo: kp,
+          stage: "Grinding",
+          operatorName: currentUser.email,
+          endTime: now.toISOString(),
+          activeTimeMs: activeMs,
+          nextStage: nextStage,
+          remarks: job.grinding.remarks,
+          qualityRemarks: job.grinding.qualityRemarks,
+          notes: job.grinding.notes
+        };
+      }
+    };
+
+    const applyLocalMutation = (nextStage) => {
+      if (!isSplit) {
+        job.grinding.status = "Completed";
+        job.grinding.endTime = now.toISOString();
+        job.grinding.durationMs = activeMs;
+        job.grinding.nextProcess = nextStage;
+        transitionToStage(job, nextStage, currentUser.email);
+      }
+    };
 
     selectedGrindingJobKp = null;
     closeGrindingCompleteModal();
-    renderAll();
 
-    createAuditLog(currentUser.email, kp, `Completed Grinding stage and moved component to ${nextDept} Department`);
-
-    pendingSyncCount++;
-    sendBackendPost(payload)
-      .then(() => {
-        pendingSyncCount--;
-        if (pendingSyncCount === 0) {
-          return loadState().then(() => renderAll());
-        }
-      })
-      .catch(err => {
-        pendingSyncCount--;
-        console.error("Failed to sync completed grinding job:", err);
-      });
+    showFloatingCardTransition(job, "Grinding", payloadGenerator, applyLocalMutation);
   }
 }
 
@@ -6386,106 +7079,151 @@ function submitCompleteGrinding(e) {
 window.openStartGrindingModal = openStartGrindingModal;
 window.selectActiveGrindingJobAndSwitch = selectActiveGrindingJobAndSwitch;
 
+function triggerPolishingFloatingTransition(kpNumber) {
+  const job = jobs.find(j => j.kpNumber === kpNumber);
+  if (!job) return;
+
+  const doneQtyStr = prompt(`Enter quantity completed for Polishing (out of ${job.quantity}):`, job.quantity);
+  if (doneQtyStr === null) return; // Cancelled
+  const doneQty = parseInt(doneQtyStr);
+  if (isNaN(doneQty) || doneQty <= 0 || doneQty > job.quantity) {
+    alert(`Please enter a valid quantity done (must be between 1 and ${job.quantity}).`);
+    return;
+  }
+
+  const payloadGenerator = (nextStage) => {
+    const isSplit = doneQty < job.quantity;
+    if (isSplit) {
+      return splitJobAndProgress(job, doneQty, nextStage, getLoggedUser().name, "Polishing");
+    } else {
+      return {
+        type: "END_CYCLE",
+        kpNo: job.kpNumber,
+        stage: "Polishing",
+        operatorName: getLoggedUser().name,
+        endTime: new Date().toISOString(),
+        activeTimeMs: 0,
+        nextStage: nextStage
+      };
+    }
+  };
+
+  const applyLocalMutation = (nextStage) => {
+    const isSplit = doneQty < job.quantity;
+    if (!isSplit) {
+      transitionToStage(job, nextStage, getLoggedUser().name);
+    }
+  };
+
+  showFloatingCardTransition(job, "Polishing", payloadGenerator, applyLocalMutation);
+}
+
 function renderPolishingDashboard() {
-  const tbody = document.getElementById("polishing-queue-list");
-  if (!tbody) return;
-  tbody.innerHTML = "";
+  const container = document.getElementById("polishing-queue-cards");
+  if (!container) return;
+  container.innerHTML = "";
   
   const polishingJobs = jobs.filter(j => j.currentDepartment === "Polishing");
   if (polishingJobs.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted">No components in polishing stage.</td></tr>`;
+    container.innerHTML = `<div class="no-selection-message" style="grid-column: 1 / -1; width: 100%;">No components in polishing stage.</div>`;
     return;
   }
   
   const isReadOnly = (currentUser && currentUser.role === 'hr_admin');
   
   polishingJobs.forEach(job => {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td class="font-mono font-bold text-cyan">${getCleanKpNumber(job.kpNumber)}${getJobJcNo(job) ? ` (${getJobJcNo(job)})` : ""}</td>
-      <td>${job.partName}</td>
-      <td>${job.customer}</td>
-      <td class="font-mono">
-        ${renderQuantityWithHistory(job, true)}
-        ${job.splitRemark ? `<div class="split-remark text-orange" style="color: #f97316 !important; font-size: 11px; margin-top: 4px;">${job.splitRemark}</div>` : ""}
-      </td>
-      <td><span class="badge badge-pending">Polishing Pending</span></td>
-      <td>${job.priority}</td>
-      <td>
-        <select id="polishing-next-stage-${job.kpNumber}" class="form-input select-sm" style="display:inline-block; width:auto; margin-right:5px; height:30px; padding:2px 5px; font-size:12px;" ${isReadOnly ? 'disabled style="display:none;"' : ''}>
-          <option value="Inspection">Inspection</option>
-          <option value="Masking">Masking</option>
-          <option value="Spraying">Spraying</option>
-          <option value="Grinding">Grinding</option>
-          <option value="Polishing">Polishing</option>
-          <option value="Final Inspection" selected>Final Inspection</option>
-          <option value="Dispatch">Dispatch</option>
-        </select>
-        <button class="btn btn-success btn-xs" onclick="progressPolishingJob('${job.kpNumber}')" ${isReadOnly ? 'disabled style="display:none;"' : ''}>Complete Polishing</button>
-      </td>
+    const cleanJc = getJobJcNo(job);
+    const priorityClass = String(job.priority || "Normal").toLowerCase();
+    const card = document.createElement("div");
+    card.className = "stage-kanban-card";
+    card.draggable = !isReadOnly;
+    
+    if (!isReadOnly) {
+      card.addEventListener("dragstart", (e) => {
+        e.dataTransfer.setData("text/plain", job.kpNumber);
+        card.classList.add("dragging");
+        triggerPolishingFloatingTransition(job.kpNumber);
+      });
+      card.addEventListener("dragend", () => {
+        card.classList.remove("dragging");
+      });
+    }
+
+    card.innerHTML = `
+      <div class="stage-card-priority-strip ${priorityClass}"></div>
+      <div class="job-card-header" style="margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+        <span class="font-mono font-bold text-cyan" style="font-size: 14px;">${getCleanKpNumber(job.kpNumber)}${cleanJc ? ` (${cleanJc})` : ""}</span>
+        <span class="badge badge-normal" style="font-size: 10px; font-weight: 700;">${job.processType}</span>
+      </div>
+      <div class="job-card-body" style="font-size: 12px; display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px;">
+        <div class="job-card-row">
+          <span class="job-card-label">Part Name:</span>
+          <span class="job-card-value">${job.partName}</span>
+        </div>
+        <div class="job-card-row">
+          <span class="job-card-label">Customer:</span>
+          <span class="job-card-value">${job.customer}</span>
+        </div>
+        <div class="job-card-row">
+          <span class="job-card-label">Quantity:</span>
+          <span class="job-card-value font-mono">${renderQuantityWithHistory(job, true)}</span>
+        </div>
+        <div class="job-card-row">
+          <span class="job-card-label">Status:</span>
+          <span class="job-card-value"><span class="badge badge-pending">Polishing Pending</span></span>
+        </div>
+      </div>
+      <div class="stage-card-actions" style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 10px; display: flex; flex-direction: column; gap: 8px;">
+        <button class="btn btn-success btn-xs" style="width:100%; height:32px; ${isReadOnly ? 'display:none;' : ''}" onclick="triggerPolishingFloatingTransition('${job.kpNumber}')">Complete & Push Job</button>
+      </div>
     `;
-    tbody.appendChild(tr);
+    container.appendChild(card);
   });
 }
 
-async function progressPolishingJob(kpNumber) {
+function triggerFinalInspectionFloatingTransition(kpNumber) {
   const job = jobs.find(j => j.kpNumber === kpNumber);
-  if (job) {
-    const doneQtyStr = prompt(`Enter quantity completed for Polishing (out of ${job.quantity}):`, job.quantity);
-    if (doneQtyStr === null) return; // Cancelled
-    const doneQty = parseInt(doneQtyStr);
-    if (isNaN(doneQty) || doneQty <= 0 || doneQty > job.quantity) {
-      alert(`Please enter a valid quantity done (must be between 1 and ${job.quantity}).`);
-      return;
-    }
+  if (!job) return;
 
-    const selectEl = document.getElementById(`polishing-next-stage-${kpNumber}`);
-    const nextDept = selectEl ? selectEl.value : "Final Inspection";
-    
+  const doneQtyStr = prompt(`Enter quantity completed for Final QA (out of ${job.quantity}):`, job.quantity);
+  if (doneQtyStr === null) return; // Cancelled
+  const doneQty = parseInt(doneQtyStr);
+  if (isNaN(doneQty) || doneQty <= 0 || doneQty > job.quantity) {
+    alert(`Please enter a valid quantity done (must be between 1 and ${job.quantity}).`);
+    return;
+  }
+
+  const payloadGenerator = (nextStage) => {
     const isSplit = doneQty < job.quantity;
-    let payload = {};
-
     if (isSplit) {
-      payload = splitJobAndProgress(job, doneQty, nextDept, getLoggedUser().name, "Polishing");
+      return splitJobAndProgress(job, doneQty, nextStage, getLoggedUser().name, "Final Inspection");
     } else {
-      transitionToStage(job, nextDept, getLoggedUser().name);
-      payload = {
+      return {
         type: "END_CYCLE",
-        kpNo: kpNumber,
-        stage: "Polishing",
+        kpNo: job.kpNumber,
+        stage: "Final Inspection",
         operatorName: getLoggedUser().name,
         endTime: new Date().toISOString(),
         activeTimeMs: 0,
-        nextStage: nextDept
+        nextStage: nextStage
       };
     }
-    
-    // Optimistic UI mutation
-    renderAll();
+  };
 
-    // Background sync
-    pendingSyncCount++;
-    sendBackendPost(payload)
-      .then(() => {
-        pendingSyncCount--;
-        if (pendingSyncCount === 0) {
-          return loadState().then(() => renderAll());
-        }
-      })
-      .catch(err => {
-        pendingSyncCount--;
-        console.error("Failed to sync polishing progression:", err);
-        if (pendingSyncCount === 0) {
-          return loadState().then(() => renderAll());
-        }
-      });
-  }
+  const applyLocalMutation = (nextStage) => {
+    const isSplit = doneQty < job.quantity;
+    if (!isSplit) {
+      transitionToStage(job, nextStage, getLoggedUser().name);
+    }
+  };
+
+  showFloatingCardTransition(job, "Final Inspection", payloadGenerator, applyLocalMutation);
 }
 
 function renderFinalInspectionDashboard() {
-  const tbody = document.getElementById("final-inspection-queue-list");
-  if (!tbody) return;
-  tbody.innerHTML = "";
+  const container = document.getElementById("final-inspection-queue-cards");
+  if (!container) return;
+  container.innerHTML = "";
   
   const filterKp = document.getElementById("final-filter-kp") ? document.getElementById("final-filter-kp").value.toLowerCase() : "";
   const filterJc = document.getElementById("final-filter-jc") ? document.getElementById("final-filter-jc").value.toLowerCase() : "";
@@ -6506,14 +7244,18 @@ function renderFinalInspectionDashboard() {
   });
 
   if (finalJobs.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted">No components in final inspection queue matching the filters.</td></tr>`;
+    container.innerHTML = `<div class="no-selection-message" style="grid-column: 1 / -1; width: 100%;">No components in final inspection queue matching the filters.</div>`;
     return;
   }
   
   const isReadOnly = (currentUser && currentUser.role === 'hr_admin');
   
   finalJobs.forEach(job => {
-    const tr = document.createElement("tr");
+    const cleanJc = getJobJcNo(job);
+    const priorityClass = String(job.priority || "Normal").toLowerCase();
+    const card = document.createElement("div");
+    card.className = "stage-kanban-card";
+    card.draggable = !isReadOnly;
     
     let statusClass = "badge-pending";
     let statusText = "QA Review Pending";
@@ -6526,183 +7268,152 @@ function renderFinalInspectionDashboard() {
       statusText = "QA Review On Hold";
     }
 
-    tr.innerHTML = `
-      <td class="font-mono font-bold text-cyan">${getCleanKpNumber(job.kpNumber)}${getJobJcNo(job) ? ` (${getJobJcNo(job)})` : ""}</td>
-      <td>${job.partName}</td>
-      <td>${job.customer}</td>
-      <td class="font-mono">
-        ${renderQuantityWithHistory(job, true)}
-        ${job.splitRemark ? `<div class="split-remark text-orange" style="color: #f97316 !important; font-size: 11px; margin-top: 4px;">${job.splitRemark}</div>` : ""}
-      </td>
-      <td><span class="badge ${statusClass}">${statusText}</span></td>
-      <td>${job.priority}</td>
-      <td>
-        <select id="final-inspection-next-stage-${job.kpNumber}" class="form-input select-sm" style="display:inline-block; width:auto; margin-right:5px; height:30px; padding:2px 5px; font-size:12px;" ${isReadOnly ? 'disabled style="display:none;"' : ''}>
-          <option value="Inspection">Inspection</option>
-          <option value="Masking">Masking</option>
-          <option value="Spraying">Spraying</option>
-          <option value="Grinding">Grinding</option>
-          <option value="Polishing">Polishing</option>
-          <option value="Final Inspection">Final Inspection</option>
-          <option value="Dispatch" selected>Dispatch</option>
-        </select>
-        <button class="btn btn-success btn-xs" onclick="progressFinalInspectionJob('${job.kpNumber}')" ${isReadOnly ? 'disabled style="display:none;"' : ''}>Approve QA & Close</button>
-      </td>
+    if (!isReadOnly) {
+      card.addEventListener("dragstart", (e) => {
+        e.dataTransfer.setData("text/plain", job.kpNumber);
+        card.classList.add("dragging");
+        triggerFinalInspectionFloatingTransition(job.kpNumber);
+      });
+      card.addEventListener("dragend", () => {
+        card.classList.remove("dragging");
+      });
+    }
+
+    card.innerHTML = `
+      <div class="stage-card-priority-strip ${priorityClass}"></div>
+      <div class="job-card-header" style="margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+        <span class="font-mono font-bold text-cyan" style="font-size: 14px;">${getCleanKpNumber(job.kpNumber)}${cleanJc ? ` (${cleanJc})` : ""}</span>
+        <span class="badge badge-normal" style="font-size: 10px; font-weight: 700;">${job.processType}</span>
+      </div>
+      <div class="job-card-body" style="font-size: 12px; display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px;">
+        <div class="job-card-row">
+          <span class="job-card-label">Part Name:</span>
+          <span class="job-card-value">${job.partName}</span>
+        </div>
+        <div class="job-card-row">
+          <span class="job-card-label">Customer:</span>
+          <span class="job-card-value">${job.customer}</span>
+        </div>
+        <div class="job-card-row">
+          <span class="job-card-label">Quantity:</span>
+          <span class="job-card-value font-mono">${renderQuantityWithHistory(job, true)}</span>
+        </div>
+        <div class="job-card-row">
+          <span class="job-card-label">Status:</span>
+          <span class="job-card-value"><span class="badge ${statusClass}">${statusText}</span></span>
+        </div>
+      </div>
+      <div class="stage-card-actions" style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 10px; display: flex; flex-direction: column; gap: 8px;">
+        <button class="btn btn-success btn-xs" style="width:100%; height:32px; ${isReadOnly ? 'display:none;' : ''}" onclick="triggerFinalInspectionFloatingTransition('${job.kpNumber}')">Approve QA & Close</button>
+      </div>
     `;
-    tbody.appendChild(tr);
+    container.appendChild(card);
   });
 }
 
-async function progressFinalInspectionJob(kpNumber) {
+function triggerDispatchFloatingTransition(kpNumber) {
   const job = jobs.find(j => j.kpNumber === kpNumber);
-  if (job) {
-    const doneQtyStr = prompt(`Enter quantity completed for Final Inspection (out of ${job.quantity}):`, job.quantity);
-    if (doneQtyStr === null) return; // Cancelled
-    const doneQty = parseInt(doneQtyStr);
-    if (isNaN(doneQty) || doneQty <= 0 || doneQty > job.quantity) {
-      alert(`Please enter a valid quantity done (must be between 1 and ${job.quantity}).`);
-      return;
-    }
+  if (!job) return;
 
-    const selectEl = document.getElementById(`final-inspection-next-stage-${kpNumber}`);
-    const nextDept = selectEl ? selectEl.value : "Dispatch";
-    
+  const doneQtyStr = prompt(`Enter quantity completed for Dispatch (out of ${job.quantity}):`, job.quantity);
+  if (doneQtyStr === null) return; // Cancelled
+  const doneQty = parseInt(doneQtyStr);
+  if (isNaN(doneQty) || doneQty <= 0 || doneQty > job.quantity) {
+    alert(`Please enter a valid quantity done (must be between 1 and ${job.quantity}).`);
+    return;
+  }
+
+  const payloadGenerator = (nextStage) => {
     const isSplit = doneQty < job.quantity;
-    let payload = {};
-
     if (isSplit) {
-      payload = splitJobAndProgress(job, doneQty, nextDept, getLoggedUser().name, "Final Inspection");
+      return splitJobAndProgress(job, doneQty, nextStage, getLoggedUser().name, "Dispatch");
     } else {
-      transitionToStage(job, nextDept, getLoggedUser().name);
-      payload = {
+      return {
         type: "END_CYCLE",
-        kpNo: kpNumber,
-        stage: "Final Inspection",
+        kpNo: job.kpNumber,
+        stage: "Dispatch",
         operatorName: getLoggedUser().name,
         endTime: new Date().toISOString(),
         activeTimeMs: 0,
-        nextStage: nextDept
+        nextStage: nextStage
       };
     }
-    
-    renderAll();
+  };
 
-    // Background sync
-    pendingSyncCount++;
-    sendBackendPost(payload)
-      .then(() => {
-        pendingSyncCount--;
-        if (pendingSyncCount === 0) {
-          return loadState().then(() => renderAll());
-        }
-      })
-      .catch(err => {
-        pendingSyncCount--;
-        console.error("Failed to sync final inspection progression:", err);
-        if (pendingSyncCount === 0) {
-          return loadState().then(() => renderAll());
-        }
-      });
-  }
+  const applyLocalMutation = (nextStage) => {
+    const isSplit = doneQty < job.quantity;
+    if (!isSplit) {
+      transitionToStage(job, nextStage, getLoggedUser().name);
+      if (nextStage === "Dispatched") {
+        job.status = "Completed";
+      }
+    }
+  };
+
+  showFloatingCardTransition(job, "Dispatch", payloadGenerator, applyLocalMutation);
 }
 
 function renderDispatchDashboard() {
-  const tbody = document.getElementById("dispatch-queue-list");
-  if (!tbody) return;
-  tbody.innerHTML = "";
+  const container = document.getElementById("dispatch-queue-cards");
+  if (!container) return;
+  container.innerHTML = "";
   
   const dispatchJobs = jobs.filter(j => j.currentDepartment === "Dispatch");
   if (dispatchJobs.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted">No components ready for dispatch.</td></tr>`;
+    container.innerHTML = `<div class="no-selection-message" style="grid-column: 1 / -1; width: 100%;">No components ready for dispatch.</div>`;
     return;
   }
   
   const isReadOnly = (currentUser && (currentUser.role === 'hr_admin' || currentUser.role === 'quality_admin'));
   
   dispatchJobs.forEach(job => {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td class="font-mono font-bold text-cyan">${getCleanKpNumber(job.kpNumber)}${getJobJcNo(job) ? ` (${getJobJcNo(job)})` : ""}</td>
-      <td>${job.partName}</td>
-      <td>${job.customer}</td>
-      <td class="font-mono">
-        ${renderQuantityWithHistory(job, true)}
-        ${job.splitRemark ? `<div class="split-remark text-orange" style="color: #f97316 !important; font-size: 11px; margin-top: 4px;">${job.splitRemark}</div>` : ""}
-      </td>
-      <td><span class="badge badge-completed">Ready for Dispatch</span></td>
-      <td>${job.priority}</td>
-      <td>
-        <select id="dispatch-next-stage-${job.kpNumber}" class="form-input select-sm" style="display:inline-block; width:auto; margin-right:5px; height:30px; padding:2px 5px; font-size:12px;" ${isReadOnly ? 'disabled style="display:none;"' : ''}>
-          <option value="Inspection">Inspection</option>
-          <option value="Masking">Masking</option>
-          <option value="Spraying">Spraying</option>
-          <option value="Grinding">Grinding</option>
-          <option value="Polishing">Polishing</option>
-          <option value="Final Inspection">Final Inspection</option>
-          <option value="Dispatch">Dispatch</option>
-          <option value="Dispatched" selected>Dispatched (Complete)</option>
-        </select>
-        <button class="btn btn-success btn-xs" onclick="progressDispatchJob('${job.kpNumber}')" ${isReadOnly ? 'disabled style="display:none;"' : ''}>Dispatch Job</button>
-      </td>
-    `;
-    tbody.appendChild(tr);
-  });
-}
-
-async function progressDispatchJob(kpNumber) {
-  const job = jobs.find(j => j.kpNumber === kpNumber);
-  if (job) {
-    const doneQtyStr = prompt(`Enter quantity completed for Dispatch (out of ${job.quantity}):`, job.quantity);
-    if (doneQtyStr === null) return; // Cancelled
-    const doneQty = parseInt(doneQtyStr);
-    if (isNaN(doneQty) || doneQty <= 0 || doneQty > job.quantity) {
-      alert(`Please enter a valid quantity done (must be between 1 and ${job.quantity}).`);
-      return;
-    }
-
-    const selectEl = document.getElementById(`dispatch-next-stage-${kpNumber}`);
-    const nextDept = selectEl ? selectEl.value : "Dispatched";
+    const cleanJc = getJobJcNo(job);
+    const priorityClass = String(job.priority || "Normal").toLowerCase();
+    const card = document.createElement("div");
+    card.className = "stage-kanban-card";
+    card.draggable = !isReadOnly;
     
-    const isSplit = doneQty < job.quantity;
-    let payload = {};
-
-    if (isSplit) {
-      payload = splitJobAndProgress(job, doneQty, nextDept, getLoggedUser().name, "Dispatch");
-    } else {
-      transitionToStage(job, nextDept, getLoggedUser().name);
-      if (nextDept === "Dispatched") {
-        job.status = "Completed";
-      }
-      payload = {
-        type: "END_CYCLE",
-        kpNo: kpNumber,
-        stage: "Dispatch",
-        operatorName: getLoggedUser().name,
-        endTime: new Date().toISOString(),
-        activeTimeMs: 0,
-        nextStage: nextDept
-      };
-    }
-    
-    renderAll();
-
-    // Background sync
-    pendingSyncCount++;
-    sendBackendPost(payload)
-      .then(() => {
-        pendingSyncCount--;
-        if (pendingSyncCount === 0) {
-          return loadState().then(() => renderAll());
-        }
-      })
-      .catch(err => {
-        pendingSyncCount--;
-        console.error("Failed to sync dispatch progression:", err);
-        if (pendingSyncCount === 0) {
-          return loadState().then(() => renderAll());
-        }
+    if (!isReadOnly) {
+      card.addEventListener("dragstart", (e) => {
+        e.dataTransfer.setData("text/plain", job.kpNumber);
+        card.classList.add("dragging");
+        triggerDispatchFloatingTransition(job.kpNumber);
       });
-  }
+      card.addEventListener("dragend", () => {
+        card.classList.remove("dragging");
+      });
+    }
+
+    card.innerHTML = `
+      <div class="stage-card-priority-strip ${priorityClass}"></div>
+      <div class="job-card-header" style="margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+        <span class="font-mono font-bold text-cyan" style="font-size: 14px;">${getCleanKpNumber(job.kpNumber)}${cleanJc ? ` (${cleanJc})` : ""}</span>
+        <span class="badge badge-normal" style="font-size: 10px; font-weight: 700;">${job.processType}</span>
+      </div>
+      <div class="job-card-body" style="font-size: 12px; display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px;">
+        <div class="job-card-row">
+          <span class="job-card-label">Part Name:</span>
+          <span class="job-card-value">${job.partName}</span>
+        </div>
+        <div class="job-card-row">
+          <span class="job-card-label">Customer:</span>
+          <span class="job-card-value">${job.customer}</span>
+        </div>
+        <div class="job-card-row">
+          <span class="job-card-label">Quantity:</span>
+          <span class="job-card-value font-mono">${renderQuantityWithHistory(job, true)}</span>
+        </div>
+        <div class="job-card-row">
+          <span class="job-card-label">Status:</span>
+          <span class="job-card-value"><span class="badge badge-completed">Ready for Dispatch</span></span>
+        </div>
+      </div>
+      <div class="stage-card-actions" style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 10px; display: flex; flex-direction: column; gap: 8px;">
+        <button class="btn btn-success btn-xs" style="width:100%; height:32px; ${isReadOnly ? 'display:none;' : ''}" onclick="triggerDispatchFloatingTransition('${job.kpNumber}')">Dispatch & Close</button>
+      </div>
+    `;
+    container.appendChild(card);
+  });
 }
 
 // User Management Renderer (Super Admin only)
@@ -6950,11 +7661,71 @@ async function deleteUser(uid) {
   }
 }
 
+function showToast(title, message, type = 'info') {
+  let container = document.getElementById("toast-container");
+  if (!container) {
+    container = document.createElement("div");
+    container.id = "toast-container";
+    container.style.position = "fixed";
+    container.style.top = "20px";
+    container.style.right = "20px";
+    container.style.zIndex = "9999";
+    container.style.display = "flex";
+    container.style.flexDirection = "column";
+    container.style.gap = "10px";
+    document.body.appendChild(container);
+  }
+
+  const toast = document.createElement("div");
+  toast.className = `toast toast-${type}`;
+  toast.style.background = "var(--bg-card, #1e293b)";
+  toast.style.border = "1px solid var(--border-color, #334155)";
+  toast.style.borderRadius = "8px";
+  toast.style.padding = "12px 16px";
+  toast.style.boxShadow = "0 10px 15px -3px rgba(0, 0, 0, 0.5)";
+  toast.style.display = "flex";
+  toast.style.alignItems = "center";
+  toast.style.gap = "12px";
+  toast.style.color = "var(--text-primary, #f8fafc)";
+  toast.style.minWidth = "280px";
+  toast.style.opacity = "0";
+  toast.style.transition = "all 0.3s ease";
+  toast.style.transform = "translateX(50px)";
+
+  let color = "#38bdf8"; 
+  if (type === 'success') color = "#10b981";
+  else if (type === 'danger' || type === 'error') color = "#ef4444";
+  else if (type === 'warning') color = "#f59e0b";
+
+  toast.style.borderLeft = `4px solid ${color}`;
+
+  toast.innerHTML = `
+    <div style="flex:1;">
+      <div style="font-weight:700; font-size:13px; color:${color};">${title}</div>
+      <div style="font-size:12px; color:var(--text-muted, #94a3b8); margin-top:2px;">${message}</div>
+    </div>
+    <button type="button" style="background:none; border:none; color:var(--text-muted); font-size:16px; cursor:pointer;" onclick="this.parentElement.remove()">&times;</button>
+  `;
+
+  container.appendChild(toast);
+  setTimeout(() => {
+    toast.style.opacity = "1";
+    toast.style.transform = "translateX(0)";
+  }, 10);
+
+  setTimeout(() => {
+    toast.style.opacity = "0";
+    toast.style.transform = "translateX(50px)";
+    setTimeout(() => toast.remove(), 300);
+  }, 4000);
+}
+window.showToast = showToast;
+
 // Expose stage functions to global window scope so onclick bindings can reach them
 window.progressGrindingJob = progressGrindingJob;
-window.progressPolishingJob = progressPolishingJob;
-window.progressFinalInspectionJob = progressFinalInspectionJob;
-window.progressDispatchJob = progressDispatchJob;
+window.triggerPolishingFloatingTransition = triggerPolishingFloatingTransition;
+window.triggerFinalInspectionFloatingTransition = triggerFinalInspectionFloatingTransition;
+window.triggerDispatchFloatingTransition = triggerDispatchFloatingTransition;
 window.toggleUserStatus = toggleUserStatus;
 window.deleteUser = deleteUser;
 window.saveAndApproveUser = saveAndApproveUser;
@@ -7219,7 +7990,7 @@ function setupEventListeners() {
   });
 
   // Logout event
-  const logoutBtn = document.getElementById("btn-logout");
+  const logoutBtn = document.getElementById("btn-sidebar-logout") || document.getElementById("btn-logout");
   if (logoutBtn) {
     logoutBtn.addEventListener("click", () => {
       createAuditLog(currentUser.email, null, "Logout Success");

@@ -1,10 +1,18 @@
-// Seed data for the MES Masking Department Dashboard
+// Zoho Projects MES Dashboard - Seed Data Configurator
+const SEED_MACHINES = [
+  { id: "m-1", name: "Amba", status: "Active", department: "Grinding" },
+  { id: "m-2", name: "HMT G17", status: "Active", department: "Grinding" },
+  { id: "m-3", name: "Zanetti Toss", status: "Active", department: "Grinding" },
+  { id: "m-4", name: "Landis M12", status: "Maintenance", department: "Grinding" },
+  { id: "m-5", name: "Spitfire Polish-X", status: "Active", department: "Polishing" }
+];
+
 const SEED_OPERATORS = [
-  { id: "op-1", name: "Suresh Kumar", shift: "A Shift", jobsAssigned: 12, jobsCompleted: 10, activeTimeMs: 36000000 },
-  { id: "op-2", name: "Rajesh Patil", shift: "B Shift", jobsAssigned: 8, jobsCompleted: 8, activeTimeMs: 28800000 },
-  { id: "op-3", name: "Amit Mishra", shift: "C Shift", jobsAssigned: 5, jobsCompleted: 4, activeTimeMs: 18000000 },
-  { id: "op-4", name: "Vijay Sharma", shift: "A Shift", jobsAssigned: 15, jobsCompleted: 14, activeTimeMs: 45000000 },
-  { id: "op-5", name: "Vinod Yadav", shift: "B Shift", jobsAssigned: 9, jobsCompleted: 9, activeTimeMs: 32400000 }
+  { id: "uid-masking-operator", name: "Rajesh Patil", shift: "A Shift", jobsAssigned: 0, jobsCompleted: 0, activeTimeMs: 0 },
+  { id: "uid-spraying-operator", name: "Spraying Operator", shift: "B Shift", jobsAssigned: 0, jobsCompleted: 0, activeTimeMs: 0 },
+  { id: "uid-grinding-operator", name: "Grinding Operator", shift: "C Shift", jobsAssigned: 0, jobsCompleted: 0, activeTimeMs: 0 },
+  { id: "uid-polishing-operator", name: "Polishing Operator", shift: "A Shift", jobsAssigned: 0, jobsCompleted: 0, activeTimeMs: 0 },
+  { id: "uid-gt-operator", name: "Inspector 02", shift: "A Shift", jobsAssigned: 0, jobsCompleted: 0, activeTimeMs: 0 }
 ];
 
 const SEED_MATERIALS = [
@@ -29,6 +37,12 @@ const SEED_JOBS = [
     status: "Pending", // Global Status
     operatorName: "",
     shift: "",
+    inspection: {
+      status: "Completed",
+      startTime: "2026-06-14T08:00:00Z",
+      endTime: "2026-06-14T09:30:00Z",
+      operatorName: "Supervisor A"
+    },
     masking: {
       operatorName: "",
       shift: "",
@@ -41,8 +55,8 @@ const SEED_JOBS = [
       lastPausedAt: null,
       holdHistory: [],
       materials: [
-        { name: "Masking Tape", type: "Tape", batch: "MT-2026-06", unit: "KG", plannedQty: 5.0, actualQty: 0 },
-        { name: "High Temperature Putty", type: "Sealant", batch: "HTP-9921", unit: "Gram", plannedQty: 350, actualQty: 0 }
+        { name: "Masking Tape", type: "Tape", batch: "MT-2026-06", unit: "KG", plannedQty: 1.0, actualQty: 0 },
+        { name: "High Temperature Putty", type: "Sealant", batch: "HTP-9921", unit: "Gram", plannedQty: 150, actualQty: 0 }
       ]
     },
     spraying: { status: "Pending" },
@@ -64,6 +78,12 @@ const SEED_JOBS = [
     status: "Pending",
     operatorName: "",
     shift: "",
+    inspection: {
+      status: "Completed",
+      startTime: "2026-06-13T10:00:00Z",
+      endTime: "2026-06-13T11:15:00Z",
+      operatorName: "Supervisor A"
+    },
     masking: {
       operatorName: "",
       shift: "",
@@ -98,6 +118,13 @@ const SEED_JOBS = [
     status: "Inspection Pending",
     operatorName: "",
     shift: "",
+    inspection: {
+      status: "Pending",
+      queueEntryTime: "2026-06-14T08:10:00Z",
+      startTime: null,
+      endTime: null,
+      operatorName: ""
+    },
     masking: {
       operatorName: "",
       shift: "",
@@ -111,7 +138,11 @@ const SEED_JOBS = [
       holdHistory: [],
       materials: []
     },
-    spraying: { status: "Pending" }
+    spraying: { status: "Pending" },
+    grinding: { status: "Pending" },
+    polishing: { status: "Pending" },
+    finalInspection: { status: "Pending" },
+    dispatch: { status: "Pending" }
   },
   {
     kpNumber: "KP-1004",
@@ -126,6 +157,12 @@ const SEED_JOBS = [
     status: "Pending",
     operatorName: "",
     shift: "",
+    inspection: {
+      status: "Completed",
+      startTime: "2026-06-14T11:00:00Z",
+      endTime: "2026-06-14T12:00:00Z",
+      operatorName: "Supervisor A"
+    },
     masking: {
       operatorName: "",
       shift: "",
@@ -142,7 +179,11 @@ const SEED_JOBS = [
         { name: "Silicone Plugs", type: "Masking Aid", batch: "SP-883", unit: "Gram", plannedQty: 200, actualQty: 0 }
       ]
     },
-    spraying: { status: "Pending" }
+    spraying: { status: "Pending" },
+    grinding: { status: "Pending" },
+    polishing: { status: "Pending" },
+    finalInspection: { status: "Pending" },
+    dispatch: { status: "Pending" }
   },
   // A pre-completed job for history
   {
@@ -158,6 +199,12 @@ const SEED_JOBS = [
     status: "Completed",
     operatorName: "Rajesh Patil",
     shift: "B Shift",
+    inspection: {
+      status: "Completed",
+      startTime: "2026-06-12T09:00:00Z",
+      endTime: "2026-06-12T10:00:00Z",
+      operatorName: "Supervisor A"
+    },
     masking: {
       operatorName: "Rajesh Patil",
       shift: "B Shift",
@@ -173,7 +220,11 @@ const SEED_JOBS = [
         { name: "Masking Tape", type: "Tape", batch: "MT-2026-06", unit: "KG", plannedQty: 1.0, actualQty: 0.95 }
       ]
     },
-    spraying: { status: "Pending" }
+    spraying: { status: "Pending" },
+    grinding: { status: "Pending" },
+    polishing: { status: "Pending" },
+    finalInspection: { status: "Pending" },
+    dispatch: { status: "Pending" }
   }
 ];
 

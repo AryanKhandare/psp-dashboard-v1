@@ -234,12 +234,6 @@ async function handleAuthAction(email, password, confirmPassword, role, departme
   const btnSubmit = document.getElementById("btn-submit-login");
   const statusText = document.getElementById("loading-status-text");
 
-  // ===== COMPANY EMAIL DOMAIN VALIDATION (applies to BOTH login and signup) =====
-  if (!isCompanyEmail(email)) {
-    showToast("Access Denied", "Only Plasma Spray company email addresses are allowed.", "danger");
-    return;
-  }
-
   // ===== PIN VALIDATION =====
   if (!password || !/^[0-9]{6}$/.test(password)) {
     showToast("Validation Error", "Security PIN must be exactly 6 digits.", "danger");
@@ -248,6 +242,14 @@ async function handleAuthAction(email, password, confirmPassword, role, departme
 
   // Validate signup constraints
   if (state.mode === 'signup') {
+    if (!email) {
+      showToast("Validation Error", "Corporate Email is required.", "danger");
+      return;
+    }
+    if (!isCompanyEmail(email)) {
+      showToast("Access Denied", "Only Plasma Spray company email addresses are allowed.", "danger");
+      return;
+    }
     if (!fullname || fullname.trim() === "") {
       showToast("Validation Error", "Full Name is required.", "danger");
       return;
@@ -268,11 +270,11 @@ async function handleAuthAction(email, password, confirmPassword, role, departme
       statusText.textContent = "Verifying credentials...";
       setTimeout(() => {
         const users = MOCK_DB.getUsers();
-        const passwords = MOCK_DB.getPasswords();
-        const user = users.find(u => u.email.toLowerCase() === email.toLowerCase());
+        // Find user by PIN only
+        const user = users.find(u => u.pin === password);
         
-        if (!user || passwords[email] !== password) {
-          showErrorState("Invalid credentials. Try admin@plasmaspray.co.in / 111111");
+        if (!user) {
+          showErrorState("Invalid Security PIN.");
           return;
         }
 
@@ -318,26 +320,31 @@ async function handleAuthAction(email, password, confirmPassword, role, departme
       setTimeout(() => {
         const users = MOCK_DB.getUsers();
         
-        if (users.some(u => u.email.toLowerCase() === email.toLowerCase())) {
-          showErrorState("User email is already registered.");
+        // 1. Must be pre-assigned email
+        const preAssigned = users.find(u => u.email.toLowerCase() === email.toLowerCase().trim());
+        if (!preAssigned) {
+          showErrorState("This email has not been pre-assigned by the administrator. Please contact your administrator.");
           return;
         }
 
-        const newUid = `uid-${Math.floor(100000 + Math.random() * 900000)}`;
-        const newUser = {
-          uid: newUid,
-          name: fullname,
-          email: email.toLowerCase().trim(),
-          role: "pending",
-          department: "pending",
-          active: false,
-          emailVerified: false,
-          pin: password, // Store plaintext PIN
-          createdAt: new Date().toISOString()
-        };
+        // 2. PIN uniqueness check
+        if (users.some(u => u.pin === password && u.email.toLowerCase() !== email.toLowerCase().trim())) {
+          showErrorState("This Security PIN is already in use by another user. Please choose a unique PIN.");
+          return;
+        }
 
-        MOCK_DB.addUser(newUser, password);
-        pendingVerifyUserEmail = newUser.email;
+        // Update details
+        preAssigned.name = fullname;
+        preAssigned.pin = password;
+        preAssigned.emailVerified = false; // Needs simulated verification
+
+        MOCK_DB.saveUsers(users);
+
+        const passwords = MOCK_DB.getPasswords();
+        passwords[email.toLowerCase().trim()] = password;
+        localStorage.setItem('mock_db_passwords', JSON.stringify(passwords));
+
+        pendingVerifyUserEmail = preAssigned.email;
         
         statusText.textContent = "Sending verification email (simulated)...";
         setTimeout(() => {
@@ -355,9 +362,39 @@ async function handleAuthAction(email, password, confirmPassword, role, departme
       const db = firebase.firestore();
       
       if (state.mode === 'login') {
+        statusText.textContent = "Connecting to lookup gateway...";
+        
+        // Ensure temporary auth to query Firestore
+        if (!firebase.auth().currentUser) {
+          await firebase.auth().signInAnonymously();
+        }
+        
+        statusText.textContent = "Finding account associated with PIN...";
+        
+        // 1. Find user in Firestore by PIN
+        const querySnapshot = await db.collection("users").where("pin", "==", password).get();
+        if (querySnapshot.empty) {
+          // Clean up temp session
+          if (firebase.auth().currentUser && firebase.auth().currentUser.isAnonymous) {
+            await firebase.auth().signOut();
+          }
+          showErrorState("Invalid Security PIN.");
+          return;
+        }
+
+        const userDoc = querySnapshot.docs[0];
+        const userProfile = userDoc.data();
+        const resolvedEmail = userProfile.email;
+
+        // Sign out of anonymous session before authenticating real user
+        if (firebase.auth().currentUser && firebase.auth().currentUser.isAnonymous) {
+          await firebase.auth().signOut();
+        }
+
+        // 2. Perform standard sign-in using email and hashed PIN
         statusText.textContent = "Connecting to Authentication server...";
-        const firebasePassword = await hashPin(email, password);
-        const userCredential = await firebase.auth().signInWithEmailAndPassword(email, firebasePassword);
+        const firebasePassword = await hashPin(resolvedEmail, password);
+        const userCredential = await firebase.auth().signInWithEmailAndPassword(resolvedEmail, firebasePassword);
         const user = userCredential.user;
 
         // ===== DOMAIN CHECK after Firebase auth =====
@@ -370,47 +407,26 @@ async function handleAuthAction(email, password, confirmPassword, role, departme
         
         statusText.textContent = "Acquiring access levels...";
         
-        let userProfile = null;
-        try {
-          const doc = await db.collection("users").doc(user.uid).get();
-          if (!doc.exists) {
-            // Auto-create missing profile
-            const defaultProfile = {
-              uid: user.uid,
-              name: user.displayName || user.email.split('@')[0],
-              email: user.email,
-              role: "pending",
-              department: "pending",
-              active: false,
-              emailVerified: user.emailVerified,
-              pin: password, // Store raw PIN
-              createdAt: firebase.firestore.FieldValue.serverTimestamp()
-            };
-            await db.collection("users").doc(user.uid).set(defaultProfile);
-            userProfile = defaultProfile;
-          } else {
-            userProfile = doc.data();
-            // Sync email verification to Firestore
-            if (user.emailVerified && !userProfile.emailVerified) {
-              await db.collection("users").doc(user.uid).update({ emailVerified: true });
-              userProfile.emailVerified = true;
-            }
-            // Ensure raw PIN is updated in Firestore user profile if missing
-            if (!userProfile.pin) {
-              await db.collection("users").doc(user.uid).update({ pin: password });
-              userProfile.pin = password;
-            }
+        // Sync email verification to Firestore
+        if (user.emailVerified && !userProfile.emailVerified) {
+          await db.collection("users").doc(user.uid).update({ emailVerified: true });
+          userProfile.emailVerified = true;
+        }
+
+        // Ensure user ID is matched/stored correctly
+        if (userProfile.uid !== user.uid) {
+          // If the profile document ID is not user.uid, let's set it
+          await db.collection("users").doc(user.uid).set({
+            ...userProfile,
+            uid: user.uid
+          });
+          if (userDoc.id !== user.uid) {
+            await db.collection("users").doc(userDoc.id).delete();
           }
-        } catch (firestoreErr) {
-          console.warn("Firestore error:", firestoreErr);
-          await firebase.auth().signOut();
-          showErrorState("Security profile error. Please contact administrator.");
-          return;
         }
 
         // ===== EMAIL VERIFICATION CHECK =====
         if (!user.emailVerified && !userProfile.emailVerified) {
-          // Send verification email to currentUser if not sent recently, then log out
           try {
             await user.sendEmailVerification();
           } catch(e) {}
@@ -447,6 +463,43 @@ async function handleAuthAction(email, password, confirmPassword, role, departme
 
       } else {
         // Live Firebase Sign Up
+        statusText.textContent = "Connecting to lookup gateway...";
+        
+        // Ensure temporary auth to query Firestore
+        if (!firebase.auth().currentUser) {
+          await firebase.auth().signInAnonymously();
+        }
+        
+        statusText.textContent = "Validating pre-assigned email status...";
+        
+        // 1. Check if email is pre-assigned in Firestore
+        const userQuery = await db.collection("users").where("email", "==", email.toLowerCase().trim()).get();
+        if (userQuery.empty) {
+          if (firebase.auth().currentUser && firebase.auth().currentUser.isAnonymous) {
+            await firebase.auth().signOut();
+          }
+          showErrorState("This email has not been pre-assigned by the administrator. Please contact your administrator.");
+          return;
+        }
+
+        const preAssignedDoc = userQuery.docs[0];
+        const preAssignedData = preAssignedDoc.data();
+
+        // 2. PIN uniqueness check
+        const pinCheck = await db.collection("users").where("pin", "==", password).get();
+        if (!pinCheck.empty && pinCheck.docs.some(doc => doc.data().email.toLowerCase() !== email.toLowerCase().trim())) {
+          if (firebase.auth().currentUser && firebase.auth().currentUser.isAnonymous) {
+            await firebase.auth().signOut();
+          }
+          showErrorState("This Security PIN is already in use by another user. Please choose a unique PIN.");
+          return;
+        }
+
+        // Sign out of anonymous session before creating auth account
+        if (firebase.auth().currentUser && firebase.auth().currentUser.isAnonymous) {
+          await firebase.auth().signOut();
+        }
+
         statusText.textContent = "Creating authentication account...";
         const firebasePassword = await hashPin(email, password);
         const userCredential = await firebase.auth().createUserWithEmailAndPassword(email, firebasePassword);
@@ -467,19 +520,20 @@ async function handleAuthAction(email, password, confirmPassword, role, departme
 
         statusText.textContent = "Creating profile database record...";
         const userProfile = {
+          ...preAssignedData,
           uid: user.uid,
           name: fullname,
           email: email.toLowerCase().trim(),
-          role: "pending",
-          department: "pending",
-          active: false,
-          emailVerified: false,
           pin: password, // Store plaintext PIN in Firestore
-          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+          emailVerified: false,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
         };
 
         try {
           await db.collection("users").doc(user.uid).set(userProfile);
+          if (preAssignedDoc.id !== user.uid) {
+            await db.collection("users").doc(preAssignedDoc.id).delete();
+          }
         } catch (writeErr) {
           console.warn("Firestore profile creation error:", writeErr);
         }
@@ -495,6 +549,12 @@ async function handleAuthAction(email, password, confirmPassword, role, departme
 
     } catch (error) {
       console.error("Authentication error:", error);
+      // Clean up anonymous auth on failure
+      try {
+        if (firebase.auth().currentUser && firebase.auth().currentUser.isAnonymous) {
+          await firebase.auth().signOut();
+        }
+      } catch (e) {}
       showErrorState(error.message);
     }
   }
@@ -811,9 +871,13 @@ document.addEventListener("DOMContentLoaded", () => {
     signupRoleGroup.classList.add("hidden");
     signupDeptGroup.classList.add("hidden");
     
+    const emailGroup = document.getElementById("email-group");
+    if (emailGroup) emailGroup.classList.add("hidden");
+    
     const forgotPinContainer = document.getElementById("forgot-pin-container");
     if (forgotPinContainer) forgotPinContainer.classList.remove("hidden");
     
+    document.getElementById("login-email").required = false;
     document.getElementById("login-fullname").required = false;
     document.getElementById("login-confirm-password").required = false;
     document.getElementById("login-role").required = false;
@@ -834,9 +898,13 @@ document.addEventListener("DOMContentLoaded", () => {
     signupRoleGroup.classList.add("hidden");
     signupDeptGroup.classList.add("hidden");
     
+    const emailGroup = document.getElementById("email-group");
+    if (emailGroup) emailGroup.classList.remove("hidden");
+    
     const forgotPinContainer = document.getElementById("forgot-pin-container");
     if (forgotPinContainer) forgotPinContainer.classList.add("hidden");
     
+    document.getElementById("login-email").required = true;
     document.getElementById("login-fullname").required = true;
     document.getElementById("login-confirm-password").required = true;
     document.getElementById("login-role").required = false;
@@ -888,10 +956,11 @@ document.addEventListener("DOMContentLoaded", () => {
   if (forgotPinBtn) {
     forgotPinBtn.addEventListener("click", async (e) => {
       e.preventDefault();
-      const email = document.getElementById("login-email").value.trim();
+      let email = document.getElementById("login-email").value.trim();
       if (!email) {
-        showToast("Notice", "Please enter your Corporate Email in the field above first.", "danger");
-        return;
+        email = prompt("Please enter your Corporate Email to receive a PIN reset link:");
+        if (!email) return;
+        email = email.trim();
       }
       if (!isCompanyEmail(email)) {
         showToast("Access Denied", "Only Plasma Spray company email addresses are allowed.", "danger");

@@ -68,28 +68,18 @@
       </div>
     </div>
     
+    <!-- Zoho Global Search bar -->
+    <div class="global-search-container">
+      <span class="search-icon">🔍</span>
+      <input type="text" id="global-search-input" placeholder="Search Job Cards, customers, operators, stages...">
+    </div>
+    
     <div class="header-status-section">
       <div class="header-meta-item">
         <span class="meta-label">THEME MODE:</span>
         <button id="btn-theme-toggle" class="btn btn-secondary btn-xs font-bold" style="padding: 2px 6px; font-size: 10px; height: 22px; cursor: pointer; display: flex; align-items: center; gap: 4px;">
           <span id="theme-toggle-icon">☀️</span> <span id="theme-toggle-text">LIGHT</span>
         </button>
-      </div>
-      <div class="header-meta-item" style="display: none;">
-        <span class="meta-label">CURRENT SHIFT:</span>
-        <select id="header-shift-select" class="header-select">
-          <option value="A Shift">A Shift (06:00 - 14:00)</option>
-          <option value="B Shift">B Shift (14:00 - 22:00)</option>
-          <option value="C Shift">C Shift (22:00 - 06:00)</option>
-        </select>
-      </div>
-      <div class="header-meta-item">
-        <span class="meta-label">LOGGED USER:</span>
-        <span id="header-user-display" class="font-bold text-cyan" style="font-size: 11px; font-family: var(--font-mono); margin-top: 4px; display: inline-block;">-</span>
-      </div>
-      <div class="header-meta-item">
-        <span class="meta-label">SESSION:</span>
-        <button id="btn-logout" class="btn btn-danger btn-xs font-bold" style="padding: 2px 6px; font-size: 10px; height: 22px; cursor: pointer; display: flex; align-items: center; margin-top: 2px;">LOGOUT</button>
       </div>
       <div class="header-meta-item">
         <span class="meta-label">SYSTEM TIME:</span>
@@ -107,66 +97,86 @@
     <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
     <!-- SIDEBAR NAVIGATION -->
     <aside class="mes-sidebar" id="mes-sidebar">
-      <div class="sidebar-section-title">MES WORKFLOW STAGES</div>
-      <nav class="sidebar-nav">
-        <button class="nav-btn" data-tab="tab-overview" id="nav-btn-overview">
-          <span class="stage-num">ALL</span>
-          <span class="stage-name">MES Stage Tracker</span>
-        </button>
-        <div class="nav-separator" id="nav-sep-stages"></div>
-        <button class="nav-btn" data-tab="tab-inspection" id="nav-btn-inspection">
-          <span class="stage-num">01</span>
-          <span class="stage-name">Inspection stage</span>
-          <span class="stage-badge badge-pending" id="badge-count-inspection">0</span>
-        </button>
-        <button class="nav-btn active" data-tab="tab-masking" id="nav-btn-masking">
-          <span class="stage-num">02</span>
-          <span class="stage-name">Masking Department</span>
-          <span class="stage-badge badge-progress" id="badge-count-masking">0</span>
-        </button>
-        <button class="nav-btn" data-tab="tab-spraying" id="nav-btn-spraying">
-          <span class="stage-num">03</span>
-          <span class="stage-name">Spraying stage</span>
-          <span class="stage-badge badge-completed" id="badge-count-spraying">0</span>
-        </button>
-        <button class="nav-btn" data-tab="tab-grinding" id="nav-btn-grinding">
-          <span class="stage-num">04</span>
-          <span class="stage-name">Grinding stage</span>
-          <span class="stage-badge badge-pending" id="badge-count-grinding">0</span>
-        </button>
-        <button class="nav-btn" data-tab="tab-polishing" id="nav-btn-polishing">
-          <span class="stage-num">05</span>
-          <span class="stage-name">Polishing stage</span>
-          <span class="stage-badge badge-pending" id="badge-count-polishing">0</span>
-        </button>
-        <button class="nav-btn" data-tab="tab-final-inspection" id="nav-btn-final-inspection">
-          <span class="stage-num">06</span>
-          <span class="stage-name">Final Inspection</span>
-          <span class="stage-badge badge-pending" id="badge-count-final-inspection">0</span>
-        </button>
-        <button class="nav-btn" data-tab="tab-dispatch" id="nav-btn-dispatch">
-          <span class="stage-num">07</span>
-          <span class="stage-name">Dispatch stage</span>
-          <span class="stage-badge badge-completed" id="badge-count-dispatch">0</span>
-        </button>
-        <div class="nav-separator" id="nav-sep-admin"></div>
-        <button class="nav-btn" data-tab="tab-audit-logs" id="nav-btn-audit-logs">
-          <span class="stage-num">LOG</span>
-          <span class="stage-name">Audit Log Viewer</span>
-        </button>
-        <button class="nav-btn" data-tab="tab-user-management" id="nav-btn-user-management">
-          <span class="stage-num">ADM</span>
-          <span class="stage-name">User Management</span>
-        </button>
-        <button class="nav-btn" data-tab="tab-data-management" id="nav-btn-data-management">
-          <span class="stage-num">DMD</span>
-          <span class="stage-name">Data Management</span>
-        </button>
-      </nav>
+      <div class="sidebar-nav-container" style="display: flex; flex-direction: column; flex: 1; overflow-y: auto;">
+        <div class="sidebar-section-title">MES WORKFLOW STAGES</div>
+        <nav class="sidebar-nav">
+          <button class="nav-btn" data-tab="tab-overview" id="nav-btn-overview">
+            <span class="stage-num">ALL</span>
+            <span class="stage-name">MES Stage Tracker</span>
+          </button>
+          <div class="nav-separator" id="nav-sep-stages"></div>
+          <button class="nav-btn" data-tab="tab-inspection" id="nav-btn-inspection">
+            <span class="stage-num">01</span>
+            <span class="stage-name">Inspection stage</span>
+            <span class="stage-badge badge-pending" id="badge-count-inspection">0</span>
+          </button>
+          <button class="nav-btn active" data-tab="tab-masking" id="nav-btn-masking">
+            <span class="stage-num">02</span>
+            <span class="stage-name">Masking Department</span>
+            <span class="stage-badge badge-progress" id="badge-count-masking">0</span>
+          </button>
+          <button class="nav-btn" data-tab="tab-spraying" id="nav-btn-spraying">
+            <span class="stage-num">03</span>
+            <span class="stage-name">Spraying stage</span>
+            <span class="stage-badge badge-completed" id="badge-count-spraying">0</span>
+          </button>
+          <button class="nav-btn" data-tab="tab-grinding" id="nav-btn-grinding">
+            <span class="stage-num">04</span>
+            <span class="stage-name">Grinding stage</span>
+            <span class="stage-badge badge-pending" id="badge-count-grinding">0</span>
+          </button>
+          <button class="nav-btn" data-tab="tab-polishing" id="nav-btn-polishing">
+            <span class="stage-num">05</span>
+            <span class="stage-name">Polishing stage</span>
+            <span class="stage-badge badge-pending" id="badge-count-polishing">0</span>
+          </button>
+          <button class="nav-btn" data-tab="tab-final-inspection" id="nav-btn-final-inspection">
+            <span class="stage-num">06</span>
+            <span class="stage-name">Final Inspection</span>
+            <span class="stage-badge badge-pending" id="badge-count-final-inspection">0</span>
+          </button>
+          <button class="nav-btn" data-tab="tab-dispatch" id="nav-btn-dispatch">
+            <span class="stage-num">07</span>
+            <span class="stage-name">Dispatch stage</span>
+            <span class="stage-badge badge-completed" id="badge-count-dispatch">0</span>
+          </button>
+          <div class="nav-separator" id="nav-sep-admin"></div>
+          <button class="nav-btn" data-tab="tab-audit-logs" id="nav-btn-audit-logs">
+            <span class="stage-num">LOG</span>
+            <span class="stage-name">Audit Log Viewer</span>
+          </button>
+          <button class="nav-btn" data-tab="tab-user-management" id="nav-btn-user-management">
+            <span class="stage-num">ADM</span>
+            <span class="stage-name">User Management</span>
+          </button>
+          <button class="nav-btn" data-tab="tab-data-management" id="nav-btn-data-management">
+            <span class="stage-num">DMD</span>
+            <span class="stage-name">Data Management</span>
+          </button>
+          <button class="nav-btn" data-tab="tab-reports" id="nav-btn-reports">
+            <span class="stage-num">📊</span>
+            <span class="stage-name">Performance Reports</span>
+          </button>
+        </nav>
+        
+        <div class="sidebar-footer" style="padding: 10px 15px; border-top: 1px solid rgba(255,255,255,0.05); margin-top: 10px;">
+          <p style="font-size:10px; color:var(--text-muted);">V1.0.0 &bull; Shop Floor Module</p>
+          <button id="btn-reset-data" class="btn btn-secondary btn-xs" style="width:100%; margin-top:5px; height:24px;">Reset Shop Floor Data</button>
+        </div>
+      </div>
       
-      <div class="sidebar-footer">
-        <p>V1.0.0 &bull; Masking Module</p>
-        <button id="btn-reset-data" class="btn btn-secondary btn-xs">Reset Shop Floor Data</button>
+      <!-- Zoho User Profile Card (Bottom Sidebar) -->
+      <div class="sidebar-user-card" id="sidebar-user-card">
+        <div class="sidebar-user-info">
+          <div class="sidebar-avatar" id="sidebar-avatar-char">-</div>
+          <div class="sidebar-user-text">
+            <span class="sidebar-user-name" id="sidebar-user-display">-</span>
+            <span class="sidebar-user-role" id="sidebar-user-role-display">-</span>
+          </div>
+        </div>
+        <button id="btn-sidebar-logout" class="btn-sidebar-logout">
+          <span>🚪</span> LOGOUT
+        </button>
       </div>
     </aside>
 
@@ -177,9 +187,20 @@
       <!-- TAB: MES OVERVIEW -->
       <!-- ============================================= -->
       <section id="tab-overview" class="tab-pane">
-        <div class="section-header">
-          <h2>MES Manufacturing Workflow Pipeline</h2>
-          <p class="section-desc">Global tracking of all Job Cards (KP Numbers) across the 7 production stages.</p>
+        <div class="section-header" style="display: flex; justify-content: space-between; align-items: center; gap: 20px; flex-wrap: wrap;">
+          <div>
+            <h2>MES Manufacturing Workflow Pipeline</h2>
+            <p class="section-desc">Global tracking of all Job Cards (KP Numbers) across the 7 production stages.</p>
+          </div>
+          <!-- Zoho View Switcher Toggle -->
+          <div class="view-selector">
+            <button type="button" class="btn btn-secondary btn-sm active" id="btn-view-list" style="display: flex; align-items: center; gap: 4px; height: 32px; font-weight: 600;">
+              <span>📋</span> LIST VIEW
+            </button>
+            <button type="button" class="btn btn-secondary btn-sm" id="btn-view-kanban" style="display: flex; align-items: center; gap: 4px; height: 32px; font-weight: 600;">
+              <span>📊</span> KANBAN BOARD
+            </button>
+          </div>
         </div>
         
         <!-- Workflow Flow Chart -->
@@ -254,8 +275,21 @@
           </div>
         </div>
 
-        <!-- System Overview Table -->
-        <div class="panel">
+        <!-- Gantt Chart Timeline Widget (Zoho Resource Load) -->
+        <div class="panel gantt-chart-panel">
+          <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 15px;">
+            <h3>PRODUCTION RESOURCE TIMELINE (GANTT)</h3>
+            <span class="text-xs text-muted" style="font-family: var(--font-sans); font-size: 11px;">Tracks active machine utilization schedules</span>
+          </div>
+          <div class="panel-body" style="padding: 15px;">
+            <div id="production-gantt-timeline">
+              <!-- Rendered dynamically by app.js -->
+            </div>
+          </div>
+        </div>
+
+        <!-- System Overview Table (List View) -->
+        <div class="panel" id="overview-list-view-panel">
           <div class="panel-header">
             <h3>ACTIVE JOB ROUTING BOARD</h3>
           </div>
@@ -279,6 +313,18 @@
             </table>
           </div>
         </div>
+
+        <!-- Kanban Board View Panel -->
+        <div class="panel" id="overview-kanban-board-panel" style="display: none;">
+          <div class="panel-header">
+            <h3>SHOP FLOOR KANBAN ROUTING BOARD</h3>
+          </div>
+          <div class="panel-body" style="padding: 15px;">
+            <div class="kanban-board-container" id="overview-kanban-board">
+              <!-- Rendered dynamically by app.js -->
+            </div>
+          </div>
+        </div>
       </section>
 
       <!-- ============================================= -->
@@ -290,11 +336,11 @@
           <p class="section-desc">Simulate job registration and inspection. Approving a job here automatically creates a record in the Masking Department.</p>
         </div>
 
-        <div class="split-layout">
-          <!-- Form to create a new job card -->
-          <div class="panel">
+        <div class="inspection-workflow-container" style="display:flex; flex-direction:column; gap:20px;">
+          <!-- Horizontal form to create a new job card -->
+          <div class="panel" style="margin-bottom: 0;">
             <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center;">
-              <h3>REGISTER NEW COMPONENT FOR INSPECTION</h3>
+              <h3>NEW JOB INTAKE REGISTRATION</h3>
               <button type="button" id="btn-refresh-inspection" class="btn btn-secondary btn-xs" style="display: flex; align-items: center; gap: 4px; cursor: pointer; height: 24px; padding: 2px 8px;">
                 <span>🔄</span> REFRESH
               </button>
@@ -307,74 +353,101 @@
                 Unable to load inspection master data.
               </div>
               <form id="inspection-job-form" class="industrial-form">
-                <div class="form-grid">
-                  <div class="form-group">
-                    <label for="inspect-kp-no">KP Number *</label>
-                    <select id="inspect-kp-no" class="form-input" required>
-                      <option value="">-- Select KP Number --</option>
-                    </select>
+                <div class="form-grid" style="grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 0;">
+                  <div class="form-group" style="margin-bottom: 0;">
+                    <label for="inspect-kp-no" style="margin-bottom: 4px; font-size: 11px;">KP Number *</label>
+                    <select id="inspect-kp-no" class="form-input" required style="height: 32px; font-size: 12px; padding: 4px 8px;"></select>
                   </div>
-                  <div class="form-group">
-                    <label for="inspect-part-name">Part Name *</label>
-                    <select id="inspect-part-name" class="form-input" required>
-                      <option value="">-- Select Part Name --</option>
-                    </select>
+                  <div class="form-group" style="margin-bottom: 0;">
+                    <label for="inspect-part-name" style="margin-bottom: 4px; font-size: 11px;">Part Name *</label>
+                    <select id="inspect-part-name" class="form-input" required style="height: 32px; font-size: 12px; padding: 4px 8px;"></select>
                   </div>
-                  <div class="form-group">
-                    <label for="inspect-customer">Customer Name *</label>
-                    <select id="inspect-customer" class="form-input" required>
-                      <option value="">-- Select Customer Name --</option>
-                    </select>
+                  <div class="form-group" style="margin-bottom: 0;">
+                    <label for="inspect-customer" style="margin-bottom: 4px; font-size: 11px;">Customer Name *</label>
+                    <select id="inspect-customer" class="form-input" required style="height: 32px; font-size: 12px; padding: 4px 8px;"></select>
                   </div>
-                  <div class="form-group">
-                    <label for="inspect-quantity">Quantity *</label>
-                    <select id="inspect-quantity" class="form-input" required>
-                      <option value="">-- Select Quantity --</option>
-                    </select>
+                  <div class="form-group" style="margin-bottom: 0;">
+                    <label for="inspect-quantity" style="margin-bottom: 4px; font-size: 11px;">Quantity *</label>
+                    <select id="inspect-quantity" class="form-input" required style="height: 32px; font-size: 12px; padding: 4px 8px;"></select>
                   </div>
-                  <div class="form-group">
-                    <label for="inspect-process-type">Process Type *</label>
-                    <select id="inspect-process-type" class="form-input" required>
+                  <div class="form-group" style="margin-bottom: 0;">
+                    <label for="inspect-process-type" style="margin-bottom: 4px; font-size: 11px;">Process Type *</label>
+                    <select id="inspect-process-type" class="form-input" required style="height: 32px; font-size: 12px; padding: 4px 8px;">
                       <option value="Plasma">Plasma</option>
                       <option value="HCOS">HCOS</option>
                     </select>
                   </div>
-                  <div class="form-group">
-                    <label for="inspect-priority">Priority *</label>
-                    <select id="inspect-priority" class="form-input" required>
+                  <div class="form-group" style="margin-bottom: 0;">
+                    <label for="inspect-priority" style="margin-bottom: 4px; font-size: 11px;">Priority *</label>
+                    <select id="inspect-priority" class="form-input" required style="height: 32px; font-size: 12px; padding: 4px 8px;">
                       <option value="Normal">Normal</option>
                       <option value="High">High</option>
                       <option value="Critical">Critical</option>
                     </select>
                   </div>
+                  <div class="form-group" style="margin-bottom: 0; display: flex; align-items: flex-end;">
+                    <button type="submit" class="btn btn-primary" style="height: 32px; width: 100%; font-size: 12px; padding: 0 10px; font-weight: 700;">REGISTER CARD</button>
+                  </div>
                 </div>
-                <button type="submit" class="btn btn-primary btn-block">REGISTER JOB CARD</button>
               </form>
             </div>
           </div>
 
-          <!-- Table of jobs pending inspection/approval -->
-          <div class="panel">
-            <div class="panel-header">
-              <h3>COMPONENTS UNDER INSPECTION</h3>
+          <!-- 5-Column Kanban Board -->
+          <div class="inspection-kanban-board">
+            <!-- Column 1: INSPECTION -->
+            <div class="kanban-column" data-status="Intake">
+              <div class="kanban-column-header border-blue">
+                <span class="column-title">INSPECTION</span>
+                <span class="column-count" id="count-intake">0</span>
+              </div>
+              <div class="kanban-cards-container" id="cards-intake" ondragover="event.preventDefault(); this.classList.add('drag-over');" ondragleave="this.classList.remove('drag-over');" ondrop="handleInspectionKanbanDrop(event, 'Intake'); this.classList.remove('drag-over');">
+                <!-- Cards dynamically populated -->
+              </div>
             </div>
-            <div class="panel-body">
-              <table class="data-table">
-                <thead>
-                  <tr>
-                    <th>KP Number</th>
-                    <th>Part Name</th>
-                    <th>Customer</th>
-                    <th>Qty</th>
-                    <th>Process</th>
-                    <th>Status</th>
-                    <th>Action</th>
-                  </tr>
-                </thead>
-                <tbody id="inspection-queue-list">
-                  <!-- Dynamic Content -->
-                </tbody>
-              </table>
+
+            <!-- Column 2: MASKING -->
+            <div class="kanban-column" data-status="Visual">
+              <div class="kanban-column-header border-orange">
+                <span class="column-title">MASKING</span>
+                <span class="column-count" id="count-visual">0</span>
+              </div>
+              <div class="kanban-cards-container" id="cards-visual" ondragover="event.preventDefault(); this.classList.add('drag-over');" ondragleave="this.classList.remove('drag-over');" ondrop="handleInspectionKanbanDrop(event, 'Visual'); this.classList.remove('drag-over');">
+                <!-- Cards dynamically populated -->
+              </div>
+            </div>
+
+            <!-- Column 3: SPRAYING -->
+            <div class="kanban-column" data-status="Dimensional">
+              <div class="kanban-column-header border-purple">
+                <span class="column-title">SPRAYING</span>
+                <span class="column-count" id="count-dimensional">0</span>
+              </div>
+              <div class="kanban-cards-container" id="cards-dimensional" ondragover="event.preventDefault(); this.classList.add('drag-over');" ondragleave="this.classList.remove('drag-over');" ondrop="handleInspectionKanbanDrop(event, 'Dimensional'); this.classList.remove('drag-over');">
+                <!-- Cards dynamically populated -->
+              </div>
+            </div>
+
+            <!-- Column 4: GRINDING -->
+            <div class="kanban-column" data-status="Review">
+              <div class="kanban-column-header border-yellow">
+                <span class="column-title">GRINDING</span>
+                <span class="column-count" id="count-review">0</span>
+              </div>
+              <div class="kanban-cards-container" id="cards-review" ondragover="event.preventDefault(); this.classList.add('drag-over');" ondragleave="this.classList.remove('drag-over');" ondrop="handleInspectionKanbanDrop(event, 'Review'); this.classList.remove('drag-over');">
+                <!-- Cards dynamically populated -->
+              </div>
+            </div>
+
+            <!-- Column 5: POLISHING -->
+            <div class="kanban-column" data-status="Ready">
+              <div class="kanban-column-header border-green">
+                <span class="column-title">POLISHING</span>
+                <span class="column-count" id="count-ready">0</span>
+              </div>
+              <div class="kanban-cards-container" id="cards-ready" ondragover="event.preventDefault(); this.classList.add('drag-over');" ondragleave="this.classList.remove('drag-over');" ondrop="handleInspectionKanbanDrop(event, 'Ready'); this.classList.remove('drag-over');">
+                <!-- Cards dynamically populated -->
+              </div>
             </div>
           </div>
         </div>
@@ -1517,22 +1590,9 @@
             <h3>COMPONENTS IN POLISHING QUEUE</h3>
           </div>
           <div class="panel-body">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>KP Number</th>
-                  <th>Part Name</th>
-                  <th>Customer</th>
-                  <th>Qty</th>
-                  <th>Status</th>
-                  <th>Priority</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody id="polishing-queue-list">
-                <!-- Dynamic Content -->
-              </tbody>
-            </table>
+            <div id="polishing-queue-cards" class="stage-card-grid">
+              <!-- Dynamic Content -->
+            </div>
           </div>
         </div>
       </section>
@@ -1585,22 +1645,9 @@
               <button class="btn btn-secondary btn-sm btn-tablet-sm" id="btn-clear-final-filters" style="height:32px; font-size:11px; display:flex; align-items:center; justify-content:center; white-space:nowrap;">CLEAR FILTERS</button>
             </div>
 
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>KP Number</th>
-                  <th>Part Name</th>
-                  <th>Customer</th>
-                  <th>Qty</th>
-                  <th>Status</th>
-                  <th>Priority</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody id="final-inspection-queue-list">
-                <!-- Dynamic Content -->
-              </tbody>
-            </table>
+            <div id="final-inspection-queue-cards" class="stage-card-grid">
+              <!-- Dynamic Content -->
+            </div>
           </div>
         </div>
       </section>
@@ -1618,22 +1665,9 @@
             <h3>COMPONENTS COMPLETED & READY FOR DISPATCH</h3>
           </div>
           <div class="panel-body">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>KP Number</th>
-                  <th>Part Name</th>
-                  <th>Customer</th>
-                  <th>Qty</th>
-                  <th>Status</th>
-                  <th>Priority</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody id="dispatch-queue-list">
-                <!-- Dynamic Content -->
-              </tbody>
-            </table>
+            <div id="dispatch-queue-cards" class="stage-card-grid">
+              <!-- Dynamic Content -->
+            </div>
           </div>
         </div>
       </section>
@@ -2024,6 +2058,36 @@
                 <button type="button" class="btn btn-danger btn-block" onclick="openCrudModal('department', 'delete')" style="width: 100%;">🗑️ Delete Department</button>
               </div>
             </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ WEEKLY PERFORMANCE REPORTS TAB ============ -->
+      <section id="tab-reports" class="tab-pane">
+        <div class="section-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+          <div>
+            <h2 style="margin:0; font-size:20px; color:var(--text-highlight);">📊 Weekly Performance Report</h2>
+            <p style="margin:4px 0 0; font-size:12px; color:var(--text-muted);">Gamified operator performance ratings & analytics</p>
+          </div>
+          <div style="display:flex; gap:10px; align-items:center;">
+            <div id="report-operator-select-container" style="display:none; align-items:center; gap:6px;">
+              <label for="report-operator-select" style="font-size:12px; color:var(--text-muted);">Operator:</label>
+              <select id="report-operator-select" class="form-input" style="height:32px; width:180px; font-size:12px; border-radius:6px; background:var(--bg-card); color:var(--text-primary); border:1px solid var(--border-color);"></select>
+            </div>
+            <label for="report-week-select" style="font-size:12px; color:var(--text-muted);">Week:</label>
+            <input type="week" id="report-week-select" class="form-input" style="height:32px; width:180px; font-size:12px; border-radius:6px;">
+            <button type="button" id="btn-generate-report" class="btn btn-primary btn-xs" style="height:32px; padding:0 16px;">Generate Report</button>
+            <button type="button" id="btn-export-pdf" class="btn btn-success btn-xs" style="height:32px; padding:0 16px; display:flex; align-items:center; gap:6px;">📥 Export PDF</button>
+          </div>
+        </div>
+
+        <!-- Dynamic Report Content -->
+        <div id="report-content-area">
+          <!-- Placeholder State -->
+          <div class="report-empty-state">
+            <div style="font-size:64px; margin-bottom:16px;">📊</div>
+            <h3 style="color:var(--text-highlight); margin-bottom:8px;">Weekly Report Ready</h3>
+            <p style="color:var(--text-muted); font-size:13px; max-width:400px; margin:0 auto;">Click <strong>Generate Report</strong> or select a week to view your gamified performance breakdown with star ratings, badges, and leaderboard rankings.</p>
           </div>
         </div>
       </section>
@@ -2531,9 +2595,100 @@
     </div>
   </div>
 
+  <!-- GLOBAL INTERACTIVE TRANSITION OVERLAY (ZOHO REDESIGN) -->
+  <div id="transition-drag-overlay" class="transition-overlay" style="display: none;">
+    <div class="transition-instruction-header">
+      <h2>Select Next Stage</h2>
+      <p>Drag the card from the center and drop it onto the target stage below</p>
+    </div>
+    
+    <!-- Floating Shaking Card Container -->
+    <div class="floating-card-center-container">
+      <div id="floating-drag-card" class="stage-kanban-card floating-card" draggable="true">
+        <!-- Loaded dynamically in app.js -->
+      </div>
+    </div>
+    
+    <!-- Bottom Drop Zones Selector -->
+    <div class="bottom-stage-selector" id="bottom-stage-drop-zones">
+      <div class="drop-target-stage" data-target-stage="Masking" id="target-zone-masking">
+        <span class="drop-icon">🛡️</span>
+        <span class="drop-label">02. Masking</span>
+      </div>
+      <div class="drop-target-stage" data-target-stage="Spraying" id="target-zone-spraying">
+        <span class="drop-icon">🔥</span>
+        <span class="drop-label">03. Spraying</span>
+      </div>
+      <div class="drop-target-stage" data-target-stage="Grinding" id="target-zone-grinding">
+        <span class="drop-icon">⚙️</span>
+        <span class="drop-label">04. Grinding</span>
+      </div>
+      <div class="drop-target-stage" data-target-stage="Polishing" id="target-zone-polishing">
+        <span class="drop-icon">✨</span>
+        <span class="drop-label">05. Polishing</span>
+      </div>
+      <div class="drop-target-stage" data-target-stage="Final Inspection" id="target-zone-final">
+        <span class="drop-icon">✅</span>
+        <span class="drop-label">06. QA/QC</span>
+      </div>
+      <div class="drop-target-stage" data-target-stage="Dispatch" id="target-zone-dispatch">
+        <span class="drop-icon">🚚</span>
+        <span class="drop-label">07. Dispatch</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- FLOATING 10s UNDO COUNTDOWN BANNER (ZOHO REDESIGN) -->
+  <div id="undo-countdown-banner" class="undo-countdown-banner" style="display: none;">
+    <div class="undo-banner-content">
+      <span class="undo-icon">↩️</span>
+      <span class="undo-message">Job moved to next stage. Undoing in <strong id="undo-timer-seconds">10</strong>s...</span>
+      <button id="btn-global-undo" class="btn btn-warning btn-xs font-bold" style="height:26px; padding:0 12px; cursor:pointer;">UNDO</button>
+    </div>
+    <div class="undo-progress-bar">
+      <div id="undo-progress-fill" class="undo-progress-fill"></div>
+    </div>
+  </div>
+
+  <!-- REWORK/BACKWARD TRANSITION REASON MODAL (ZOHO REDESIGN) -->
+  <div id="modal-rework-reason" class="modal" style="display: none; align-items: center; justify-content: center; z-index: 11000; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(15, 23, 42, 0.8); backdrop-filter: blur(8px);">
+    <div class="modal-content" style="max-width: 480px; width: 90%; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; padding: 25px; box-shadow: 0 15px 30px rgba(0,0,0,0.5);">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 12px;">
+        <h3 style="margin: 0; color: var(--text-highlight); font-size: 18px; display: flex; align-items: center; gap: 8px;">
+          <span>⚠️</span> Rework / Previous Stage Push
+        </h3>
+      </div>
+      <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 15px; line-height: 1.5;">
+        You are returning this component to a previous stage (<strong id="rework-from-stage" style="color:var(--text-highlight);"></strong> ➔ <strong id="rework-to-stage" style="color:var(--text-highlight);"></strong>). Please provide the reason below:
+      </p>
+      <form id="rework-reason-form">
+        <div class="form-group" style="margin-bottom: 15px;">
+          <label for="rework-reason-select" style="display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 6px; font-weight: 600;">Reason Category *</label>
+          <select id="rework-reason-select" class="form-input" style="width: 100%; height: 38px; border-radius: 6px;" required>
+            <option value="">-- Select Predefined Reason --</option>
+            <option value="Rework Required - Defect Found">Rework Required - Defect Found</option>
+            <option value="Incorrect Specifications / Drawing Error">Incorrect Specifications / Drawing Error</option>
+            <option value="Incomplete Stage Requirements">Incomplete Stage Requirements</option>
+            <option value="Quality Audit Failure">Quality Audit Failure</option>
+            <option value="Other">Other (Specify Below)</option>
+          </select>
+        </div>
+        <div class="form-group" id="rework-custom-group" style="margin-bottom: 20px;">
+          <label for="rework-custom-input" style="display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 6px; font-weight: 600;">Comments / Explanation *</label>
+          <textarea id="rework-custom-input" class="form-input" style="width: 100%; height: 80px; padding: 8px; border-radius: 6px; resize: none;" placeholder="Explain the reasons for pushback..." required></textarea>
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 10px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 15px;">
+          <button type="button" id="btn-cancel-rework" class="btn btn-secondary btn-xs" style="height: 36px; padding: 0 15px;">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-xs" style="height: 36px; padding: 0 15px;">Confirm & Push Back</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- Scripts -->
   <script src="firebase-config.js"></script>
   <script src="seed.js"></script>
+  <script src="reports.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
