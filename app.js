@@ -210,8 +210,193 @@ let currentUser = null;
 let pendingSyncCount = 0;
 const materialSyncTimers = {};
 
-const scriptUrl = "https://script.google.com/macros/s/AKfycbyXvEXmvfSD6Lc_gkTam1ln8Kgsd_OLtcJvsWkHITLV_SUBsh3xu6CFr_ZV8Qd1yQknQw/exec";
+const scriptUrl = "https://script.google.com/macros/s/AKfycbzCxwxRMklpjhIqNfTC2acu75Rb8-RHxo2_mK5kF-gBr8pnk2tAwB3G1_Mc-Ff779RfXQ/exec";
 window.scriptUrl = scriptUrl;
+
+// ── TAT (Turn Around Time) Tracking Utilities ──────────────────────────────
+const _tatAlertedJobs = new Set(); // Session-level: prevents repeated red-alert toasts
+
+/**
+ * Calculate TAT percentage elapsed for a job.
+ * Returns 0-100+ value (can exceed 100 if overdue).
+ * Only applies to production stages: Masking, Spraying, Grinding, Polishing.
+ */
+function calcTATPct(job) {
+  if (!job.inspectionDate || !job.plannedCompletionDate) return -1;
+  const start = new Date(job.inspectionDate);
+  const end = new Date(job.plannedCompletionDate);
+  const now = new Date();
+  const totalMs = end.getTime() - start.getTime();
+  if (totalMs <= 0) return 100;
+  const elapsedMs = now.getTime() - start.getTime();
+  return Math.round((elapsedMs / totalMs) * 100);
+}
+
+/**
+ * Returns urgency level: "normal" | "warning" | "critical" | "unknown"
+ */
+function getTATUrgency(job) {
+  const pct = calcTATPct(job);
+  if (pct < 0) return "unknown";
+  if (pct >= 80) return "critical";
+  if (pct >= 50) return "warning";
+  return "normal";
+}
+
+/**
+ * Returns an object with detailed TAT info for display
+ */
+function getTATDaysInfo(job) {
+  if (!job.inspectionDate || !job.plannedCompletionDate) {
+    return { totalDays: 0, elapsedDays: 0, remainingDays: 0, pct: -1, urgency: "unknown" };
+  }
+  const start = new Date(job.inspectionDate);
+  const end = new Date(job.plannedCompletionDate);
+  const now = new Date();
+  const totalDays = Math.max(1, Math.ceil((end - start) / (1000 * 60 * 60 * 24)));
+  const elapsedDays = Math.max(0, Math.ceil((now - start) / (1000 * 60 * 60 * 24)));
+  const remainingDays = Math.max(0, Math.ceil((end - now) / (1000 * 60 * 60 * 24)));
+  const pct = calcTATPct(job);
+  return { totalDays, elapsedDays, remainingDays, pct, urgency: getTATUrgency(job) };
+}
+
+/**
+ * Build TAT chip HTML to embed into a card
+ */
+function buildTATChipHTML(job) {
+  const info = getTATDaysInfo(job);
+
+  let chipColor = '#3b82f6'; // blue
+  let chipBg = 'rgba(59,130,246,0.12)';
+  let chipBorder = 'rgba(59,130,246,0.35)';
+  let icon = '⏱';
+  let labelText = '';
+
+  if (info.pct < 0) {
+    labelText = 'Details';
+  } else {
+    labelText = `${info.remainingDays}d left`;
+    if (info.urgency === 'warning') {
+      chipColor = '#eab308';
+      chipBg = 'rgba(234,179,8,0.12)';
+      chipBorder = 'rgba(234,179,8,0.4)';
+      icon = '⚠️';
+    } else if (info.urgency === 'critical') {
+      chipColor = '#ef4444';
+      chipBg = 'rgba(239,68,68,0.15)';
+      chipBorder = 'rgba(239,68,68,0.45)';
+      icon = '🔴';
+    }
+  }
+
+  return `<span class="tat-chip" onclick="event.stopPropagation();showTATPopup('${job.kpNumber}')" style="cursor:pointer;display:inline-flex;align-items:center;gap:3px;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;background:${chipBg};color:${chipColor};border:1px solid ${chipBorder};white-space:nowrap;" title="TAT: Click to view details">${icon} ${labelText}</span>`;
+}
+
+/**
+ * Show TAT popup modal for a specific job
+ */
+function showTATPopup(kpNumber) {
+  const job = jobs.find(j => j.kpNumber === kpNumber);
+  if (!job) return;
+
+  const info = getTATDaysInfo(job);
+  const stageAssigned = job.stageAssignedAt || {};
+
+  // Build stage timeline rows
+  const stages = ['masking', 'spraying', 'grinding', 'polishing'];
+  const stageLabels = { masking: 'Masking', spraying: 'Spraying', grinding: 'Grinding', polishing: 'Polishing' };
+  let timelineHTML = '';
+  stages.forEach(st => {
+    const ts = stageAssigned[st];
+    const label = stageLabels[st];
+    const isCurrent = job.currentDepartment && job.currentDepartment.toLowerCase() === st;
+    const dotColor = ts ? (isCurrent ? '#38bdf8' : '#10b981') : '#475569';
+    const dateStr = ts ? new Date(ts).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+    timelineHTML += `
+      <div style="display:flex;align-items:center;gap:10px;padding:6px 0;">
+        <div style="width:10px;height:10px;border-radius:50%;background:${dotColor};flex-shrink:0;${isCurrent ? 'box-shadow:0 0 8px ' + dotColor + ';' : ''}"></div>
+        <div style="flex:1;">
+          <div style="font-weight:600;font-size:12px;color:${isCurrent ? '#38bdf8' : '#e2e8f0'};">${label} ${isCurrent ? '(Current)' : ''}</div>
+          <div style="font-size:11px;color:#94a3b8;">${dateStr}</div>
+        </div>
+      </div>`;
+  });
+
+  // Progress bar
+  const barPct = Math.min(info.pct, 100);
+  let barColor = '#3b82f6';
+  if (info.urgency === 'warning') barColor = '#eab308';
+  if (info.urgency === 'critical') barColor = '#ef4444';
+
+  const inspDateStr = job.inspectionDate ? new Date(job.inspectionDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+  const compDateStr = job.plannedCompletionDate ? new Date(job.plannedCompletionDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+
+  const modal = document.getElementById('tat-popup-modal');
+  if (!modal) return;
+
+  modal.querySelector('.tat-popup-content').innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h3 style="margin:0;font-size:16px;font-weight:800;color:#38bdf8;font-family:var(--font-mono);">${getCleanKpNumber(job.kpNumber)}</h3>
+      <button onclick="closeTATPopup()" style="background:none;border:none;color:#94a3b8;font-size:20px;cursor:pointer;padding:4px;">&times;</button>
+    </div>
+
+    <div style="display:flex;justify-content:space-between;gap:12px;margin-bottom:16px;">
+      <div style="flex:1;padding:10px;border-radius:8px;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.15);text-align:center;">
+        <div style="font-size:10px;color:#94a3b8;margin-bottom:4px;">Inspection Arrival</div>
+        <div style="font-size:13px;font-weight:700;color:#60a5fa;">${inspDateStr}</div>
+      </div>
+      <div style="flex:1;padding:10px;border-radius:8px;background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.15);text-align:center;">
+        <div style="font-size:10px;color:#94a3b8;margin-bottom:4px;">Planned Completion</div>
+        <div style="font-size:13px;font-weight:700;color:#f87171;">${compDateStr}</div>
+      </div>
+    </div>
+
+    <div style="margin-bottom:16px;">
+      <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
+        <span style="font-size:11px;color:#94a3b8;">${info.elapsedDays} of ${info.totalDays} days elapsed</span>
+        <span style="font-size:11px;font-weight:700;color:${barColor};">${info.remainingDays} days remaining</span>
+      </div>
+      <div style="width:100%;height:8px;background:rgba(255,255,255,0.06);border-radius:4px;overflow:hidden;">
+        <div style="width:${barPct}%;height:100%;background:${barColor};border-radius:4px;transition:width 0.5s ease;"></div>
+      </div>
+      <div style="text-align:center;margin-top:4px;font-size:10px;font-weight:700;color:${barColor};">${info.pct}% elapsed</div>
+    </div>
+
+    <div style="border-top:1px solid rgba(255,255,255,0.06);padding-top:12px;">
+      <div style="font-size:11px;font-weight:700;color:#e2e8f0;margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px;">Stage Timeline</div>
+      ${timelineHTML}
+    </div>
+  `;
+  modal.style.display = 'flex';
+}
+window.showTATPopup = showTATPopup;
+
+function closeTATPopup() {
+  const modal = document.getElementById('tat-popup-modal');
+  if (modal) modal.style.display = 'none';
+}
+window.closeTATPopup = closeTATPopup;
+
+/**
+ * Check TAT alerts for all production-stage jobs (called from renderAll)
+ * Fires a one-time red alert toast per session for critical jobs
+ */
+function checkTATAlerts() {
+  const prodStages = ['Masking', 'Spraying', 'Grinding', 'Polishing'];
+  jobs.forEach(job => {
+    if (!prodStages.includes(job.currentDepartment)) return;
+    if (_tatAlertedJobs.has(job.kpNumber)) return;
+    const urgency = getTATUrgency(job);
+    if (urgency === 'critical') {
+      _tatAlertedJobs.add(job.kpNumber);
+      const info = getTATDaysInfo(job);
+      if (typeof showToast === 'function') {
+        showToast(`⚠️ TAT CRITICAL: ${getCleanKpNumber(job.kpNumber)}`, `Only ${info.remainingDays} day(s) left! Completion deadline: ${job.plannedCompletionDate}`, 'error', 8000);
+      }
+    }
+  });
+}
+
 
 // Dynamic Google Sheet Master Data integration for Inspection Stage
 let colMapping = {
@@ -333,6 +518,39 @@ const parserWorkerCode = `
     try {
       const records = rows.map(row => {
         const cols = row.c || [];
+        
+        const cleanDate = (col) => {
+          if (!col) return "";
+          let val = col.v;
+          // GViz JSONP responses evaluate dates as JS Date objects under-the-hood
+          if (val && (val instanceof Date || Object.prototype.toString.call(val) === '[object Date]')) {
+            const y = val.getFullYear();
+            const m = String(val.getMonth() + 1).padStart(2, '0');
+            const d = String(val.getDate()).padStart(2, '0');
+            return y + "-" + m + "-" + d;
+          }
+          let strVal = col.f || col.v;
+          if (strVal === undefined || strVal === null) return "";
+          strVal = String(strVal).trim();
+          if (strVal.startsWith("Date(")) {
+            try {
+              const parts = strVal.replace("Date(", "").replace(")", "").split(",").map(Number);
+              if (parts.length >= 3) {
+                // GViz months are 0-indexed
+                const d = new Date(parts[0], parts[1], parts[2]);
+                if (!isNaN(d.getTime())) {
+                  return d.toISOString().split('T')[0];
+                }
+              }
+            } catch(e) {}
+          }
+          const d = new Date(strVal);
+          if (!isNaN(d.getTime())) {
+            return d.toISOString().split('T')[0];
+          }
+          return strVal;
+        };
+
         const kpVal      = cols[0] ? String(cols[0].v ?? "").trim() : "";
         const customer   = cols[1] ? String(cols[1].v ?? "").trim() : "";
         const partName   = cols[2] ? String(cols[2].v ?? "").trim() : "";
@@ -345,6 +563,8 @@ const parserWorkerCode = `
         const jcNo       = cols[9] ? String(cols[9].v || "").trim() : "";
         const firStVal   = cols[10] ? String(cols[10].v || "").trim() : "";
         const processTypeVal = cols[11] ? String(cols[11].v || "").trim() : "";
+        const inspectionDate = cleanDate(cols[12]);
+        const plannedCompletionDate = cleanDate(cols[13]);
 
         let assignedFirst = "", assignedSecond = "";
         if (assignedRaw) {
@@ -353,7 +573,23 @@ const parserWorkerCode = `
           assignedSecond = parts[1] || "";
         }
 
-        return { kpNo: kpVal, customer, partName, quantity, status, assignedFirst, assignedSecond, timestamp, actual: actualVal, statusY: statusYVal, jcNo, firSt: firStVal, processType: processTypeVal };
+        return { 
+          kpNo: kpVal, 
+          customer, 
+          partName, 
+          quantity, 
+          status, 
+          assignedFirst, 
+          assignedSecond, 
+          timestamp, 
+          actual: actualVal, 
+          statusY: statusYVal, 
+          jcNo, 
+          firSt: firStVal, 
+          processType: processTypeVal,
+          inspectionDate,
+          plannedCompletionDate
+        };
       }).filter(r => r.kpNo && /^kp-/i.test(r.kpNo));
 
       let filtered = records;
@@ -403,8 +639,37 @@ function parseRowsWithWorker(rows, op) {
   });
 }
 
-// Fallback: Chunked main thread parser to prevent UI freeze
 async function parseRowsMainThreadAsync(rows, op, chunkSize = 200) {
+  const cleanDate = (col) => {
+    if (!col) return "";
+    let val = col.v;
+    if (val && (val instanceof Date || Object.prototype.toString.call(val) === '[object Date]')) {
+      const y = val.getFullYear();
+      const m = String(val.getMonth() + 1).padStart(2, '0');
+      const d = String(val.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    }
+    let strVal = col.f || col.v;
+    if (strVal === undefined || strVal === null) return "";
+    strVal = String(strVal).trim();
+    if (strVal.startsWith("Date(")) {
+      try {
+        const parts = strVal.replace("Date(", "").replace(")", "").split(",").map(Number);
+        if (parts.length >= 3) {
+          const d = new Date(parts[0], parts[1], parts[2]);
+          if (!isNaN(d.getTime())) {
+            return d.toISOString().split('T')[0];
+          }
+        }
+      } catch(e) {}
+    }
+    const d = new Date(strVal);
+    if (!isNaN(d.getTime())) {
+      return d.toISOString().split('T')[0];
+    }
+    return strVal;
+  };
+
   return new Promise((resolve) => {
     let index = 0;
     const results = [];
@@ -425,6 +690,8 @@ async function parseRowsMainThreadAsync(rows, op, chunkSize = 200) {
         const jcNo       = cols[9] ? String(cols[9].v || "").trim() : "";
         const firStVal   = cols[10] ? String(cols[10].v || "").trim() : "";
         const processTypeVal = cols[11] ? String(cols[11].v || "").trim() : "";
+        const inspectionDate = cleanDate(cols[12]);
+        const plannedCompletionDate = cleanDate(cols[13]);
 
         let assignedFirst = "", assignedSecond = "";
         if (assignedRaw) {
@@ -442,7 +709,23 @@ async function parseRowsMainThreadAsync(rows, op, chunkSize = 200) {
             keep = (a1 === upperOp || a2 === upperOp);
           }
           if (keep) {
-            results.push({ kpNo: kpVal, customer, partName, quantity, status, assignedFirst, assignedSecond, timestamp, actual: actualVal, statusY: statusYVal, jcNo, firSt: firStVal, processType: processTypeVal });
+            results.push({ 
+              kpNo: kpVal, 
+              customer, 
+              partName, 
+              quantity, 
+              status, 
+              assignedFirst, 
+              assignedSecond, 
+              timestamp, 
+              actual: actualVal, 
+              statusY: statusYVal, 
+              jcNo, 
+              firSt: firStVal, 
+              processType: processTypeVal,
+              inspectionDate,
+              plannedCompletionDate
+            });
           }
         }
       }
@@ -764,9 +1047,8 @@ async function loadInspectionKPs(forceRefresh = false, isAutoRefresh = false) {
   );
 
   try {
-    // ─── Construct exact-matching SQL Query ───
-    // Query column T (KP No), F (Customer), I (Part Name), L (Qty), C (Delivered Status), V (Assigned), A (Timestamp), X (Actual), Y (Status)
-    let query = "SELECT T, F, I, J, C, V, A, X, Y, S, AM, AU WHERE T IS NOT NULL AND (C IS NULL OR LOWER(C) != 'delivered')";
+    // Query column T (KP No), F (Customer), I (Part Name), J (Qty), C (Delivered Status), V (Assigned), A (Timestamp), X (Actual), Y (Status), S (JC No), AM (FIR ST), AU (Process Type), W (Inspection/Arrival Date), AK (Planned Completion Date)
+    let query = "SELECT T, F, I, J, C, V, A, X, Y, S, AM, AU, W, AK WHERE T IS NOT NULL AND (C IS NULL OR LOWER(C) != 'delivered')";
     if (op) {
       const lowerOp = op.trim().toLowerCase();
       query += ` AND (LOWER(V) = '${lowerOp}' OR LOWER(V) LIKE '${lowerOp} /%' OR LOWER(V) LIKE '%/ ${lowerOp}' OR LOWER(V) LIKE '%/ ${lowerOp} /%')`;
@@ -878,6 +1160,7 @@ function shouldBypassMasking(partName) {
 
 async function autoSyncJobsFromSpreadsheet(records) {
   window.autoImportedKPs = window.autoImportedKPs || new Set();
+  let anyChange = false;
   
   for (const record of records) {
     const kpNo = record.kpNo;
@@ -940,9 +1223,19 @@ async function autoSyncJobsFromSpreadsheet(records) {
         updates.processType = record.processType;
         fieldsChanged = true;
       }
+      if (record.inspectionDate && record.inspectionDate !== existingJob.inspectionDate) {
+        existingJob.inspectionDate = record.inspectionDate;
+        updates.inspectionDate = record.inspectionDate;
+        fieldsChanged = true;
+      }
+      if (record.plannedCompletionDate && record.plannedCompletionDate !== existingJob.plannedCompletionDate) {
+        existingJob.plannedCompletionDate = record.plannedCompletionDate;
+        updates.plannedCompletionDate = record.plannedCompletionDate;
+        fieldsChanged = true;
+      }
 
       if (fieldsChanged) {
-        renderAll();
+        anyChange = true;
         if (!isMockMode() && existingJob.id) {
           const db = firebase.firestore();
           db.collection("jobs").doc(existingJob.id).update(updates).then(() => {
@@ -991,7 +1284,7 @@ async function autoSyncJobsFromSpreadsheet(records) {
             existingJob.masking.status = "Pending";
           }
           
-          renderAll();
+          anyChange = true;
           
           try {
             await sendBackendPost({
@@ -1009,7 +1302,7 @@ async function autoSyncJobsFromSpreadsheet(records) {
             // Rollback optimistic update
             existingJob.currentDepartment = oldDept;
             existingJob.status = oldStatus;
-            renderAll();
+            anyChange = true;
           } finally {
             window.autoImportedKPs.delete(kpNo.toLowerCase());
           }
@@ -1035,7 +1328,8 @@ async function autoSyncJobsFromSpreadsheet(records) {
         currentDepartment: targetDept,
         status: "Pending",
         jcNo: record.jcNo || "",
-        inspectionDate: new Date().toISOString().split('T')[0]
+        inspectionDate: record.inspectionDate || new Date().toISOString().split('T')[0],
+        plannedCompletionDate: record.plannedCompletionDate || ""
       };
       
       const newJob = {
@@ -1046,7 +1340,8 @@ async function autoSyncJobsFromSpreadsheet(records) {
         processType: record.processType || "Plasma",
         priority: "Normal",
         jcNo: record.jcNo || "",
-        inspectionDate: new Date().toISOString().split('T')[0],
+        inspectionDate: record.inspectionDate || new Date().toISOString().split('T')[0],
+        plannedCompletionDate: record.plannedCompletionDate || "",
         receivedDate: "",
         currentDepartment: targetDept,
         status: "Pending",
@@ -1061,7 +1356,7 @@ async function autoSyncJobsFromSpreadsheet(records) {
       };
       
       jobs.push(newJob);
-      renderAll();
+      anyChange = true;
       
       try {
         await sendBackendPost(payload);
@@ -1072,11 +1367,15 @@ async function autoSyncJobsFromSpreadsheet(records) {
       } catch (err) {
         console.error(`[Auto-Sync] Failed to save auto-imported job ${kpNo}:`, err);
         jobs = jobs.filter(j => j.kpNumber !== kpNo);
-        renderAll();
+        anyChange = true;
       } finally {
         window.autoImportedKPs.delete(kpNo.toLowerCase());
       }
     }
+  }
+  
+  if (anyChange) {
+    renderAll();
   }
 }
 
@@ -1647,7 +1946,8 @@ async function sendBackendPost(payload) {
         shift: "",
         lastUpdated: firebase.firestore.FieldValue.serverTimestamp(),
         splitRemark: "",
-        [stageKey]: stageData
+        [stageKey]: stageData,
+        [`stageAssignedAt.${nextStageKey}`]: new Date().toISOString()
       };
       
       if (nextStage !== "Dispatched") {
@@ -1690,7 +1990,8 @@ async function sendBackendPost(payload) {
         assignedOperator: null,
         shift: "",
         lastUpdated: firebase.firestore.FieldValue.serverTimestamp(),
-        inspection: inspectionData
+        inspection: inspectionData,
+        [`stageAssignedAt.${nextStageKey}`]: new Date().toISOString()
       };
 
       if (nextStage !== "Dispatched") {
@@ -1801,6 +2102,8 @@ async function sendBackendPost(payload) {
         createdDate: firebase.firestore.FieldValue.serverTimestamp(),
         createdBy: currentUser?.email || "System",
         lastUpdated: firebase.firestore.FieldValue.serverTimestamp(),
+        inspectionDate: payload.inspectionDate || new Date().toISOString().split('T')[0],
+        plannedCompletionDate: payload.plannedCompletionDate || "",
         inspection: { status: "Pending", queueEntryTime: new Date().toISOString() },
         masking: { status: "Pending", materials: [], holdHistory: [] },
         spraying: { status: "Pending" },
@@ -1850,7 +2153,7 @@ async function sendBackendPost(payload) {
     if (reqType === "BYPASS_MASKING") {
       if (!jobRef) throw new Error(`Job ${payload.kpNo} not found`);
       
-      const nextStage = payload.nextStage || "Spraying";
+      const nextStageKeyName = nextStage.toLowerCase().replace(/[^a-z]/g, "");
       const updates = {
         currentStage: nextStage,
         currentStatus: "Pending",
@@ -1863,10 +2166,10 @@ async function sendBackendPost(payload) {
           noMaskingReason: payload.reason,
           noMasking: true,
           endTime: new Date().toISOString()
-        }
+        },
+        [`stageAssignedAt.${nextStageKeyName}`]: new Date().toISOString()
       };
       
-      const nextStageKeyName = nextStage.toLowerCase().replace(/[^a-z]/g, "");
       updates[nextStageKeyName] = { 
         status: "Pending",
         queueEntryTime: new Date().toISOString()
@@ -1903,6 +2206,13 @@ async function sendBackendPost(payload) {
       
       // Create new split job
       const splitJobId = `job_${payload.splitKp.replace(/[^a-zA-Z0-9]/g, "_") || Math.floor(100000 + Math.random() * 900000)}`;
+      const nextStageKey = (payload.nextStage || "Masking").toLowerCase().replace(/[^a-z]/g, "");
+      const originalStageAssignedAt = jobData.stageAssignedAt || {};
+      const newStageAssignedAt = {
+        ...originalStageAssignedAt,
+        [nextStageKey]: new Date().toISOString()
+      };
+
       await db.collection("jobs").doc(splitJobId).set({
         jobId: splitJobId,
         kpNumber: payload.splitKp,
@@ -1922,7 +2232,8 @@ async function sendBackendPost(payload) {
         grinding: { status: "Pending", holdHistory: [] },
         polishing: { status: "Pending" },
         finalInspection: { status: "Pending" },
-        dispatch: { status: "Pending" }
+        dispatch: { status: "Pending" },
+        stageAssignedAt: newStageAssignedAt
       });
       
       await createFirestoreAuditLog(payload.operatorName, "Masking", payload.kpNo, "Job Split Completed", `Masked ${payload.doneQty} pcs, split remaining ${payload.restQty} pcs to ${payload.nextStage} as ${payload.splitKp}`);
@@ -1975,6 +2286,13 @@ async function sendBackendPost(payload) {
 
       const splitJobId = `job_${payload.splitKp.replace(/[^a-zA-Z0-9]/g, "_") || Math.floor(100000 + Math.random() * 900000)}`;
       
+      const nextStageKey = (payload.nextStage || "Masking").toLowerCase().replace(/[^a-z]/g, "");
+      const originalStageAssignedAt = jobData.stageAssignedAt || {};
+      const newStageAssignedAt = {
+        ...originalStageAssignedAt,
+        [nextStageKey]: new Date().toISOString()
+      };
+
       const splitJobDoc = {
         jobId: splitJobId,
         kpNumber: payload.splitKp,
@@ -1996,7 +2314,8 @@ async function sendBackendPost(payload) {
         grinding: { status: "Pending", holdHistory: [] },
         polishing: { status: "Pending" },
         finalInspection: { status: "Pending" },
-        dispatch: { status: "Pending" }
+        dispatch: { status: "Pending" },
+        stageAssignedAt: newStageAssignedAt
       };
 
       splitJobDoc[stageKey] = splitStageData;
@@ -2109,7 +2428,10 @@ function startFirestoreListeners() {
           polishing: data.polishing || { status: "Pending" },
           finalInspection: data.finalInspection || { status: "Pending" },
           dispatch: data.dispatch || { status: "Pending" },
-          jcNo: data.jcNo || ""
+          jcNo: data.jcNo || "",
+          inspectionDate: data.inspectionDate || "",
+          plannedCompletionDate: data.plannedCompletionDate || "",
+          stageAssignedAt: data.stageAssignedAt || {}
         };
         if (!job.jcNo && window.kpToJcMap && job.kpNumber && window.kpToJcMap[job.kpNumber.toUpperCase()]) {
           job.jcNo = window.kpToJcMap[job.kpNumber.toUpperCase()];
@@ -2365,6 +2687,8 @@ async function loadState() {
           priority: j.priority || "Normal",
           inspectionDate: j.inspectionDate || new Date().toISOString().split('T')[0],
           receivedDate: j.receivedDate || "",
+          plannedCompletionDate: j.plannedCompletionDate || "",
+          stageAssignedAt: j.stageAssignedAt || {},
           currentDepartment: j.currentDepartment || j.department || j.CurrentDepartment || "Inspection",
           status: j.status || j.Status || "Pending",
           operatorName: j.operatorName || j.operator || "",
@@ -2884,6 +3208,7 @@ function formatDuration(ms) {
 // 6. GLOBAL RENDERING MANAGER
 function renderAll() {
   applyControlRestrictions();
+  checkTATAlerts();
   
   // Update sidebar count indicators
   updateSidebarCounts();
@@ -3423,6 +3748,12 @@ function executeStageTransition(targetStage, reworkReason = null, reworkComments
 
   // Apply local mutation
   trans.applyLocalMutation(targetStage);
+  
+  if (trans.job) {
+    if (!trans.job.stageAssignedAt) trans.job.stageAssignedAt = {};
+    const key = targetStage.toLowerCase().replace(/[^a-z]/g, "");
+    trans.job.stageAssignedAt[key] = new Date().toISOString();
+  }
 
   // Generate payload
   const payload = trans.payloadGenerator(targetStage);
@@ -3961,6 +4292,13 @@ function renderLiveJobQueue() {
     const card = document.createElement("div");
     card.className = "stage-kanban-card";
     
+    const urgency = getTATUrgency(job);
+    if (urgency === "warning") {
+      card.classList.add("job-card-tat-warning");
+    } else if (urgency === "critical") {
+      card.classList.add("job-card-tat-critical");
+    }
+    
     let statusClass = "badge-pending";
     if (job.masking.status === "In Progress") statusClass = "badge-progress";
     else if (job.masking.status === "Hold") statusClass = "badge-hold";
@@ -3979,9 +4317,12 @@ function renderLiveJobQueue() {
 
     card.innerHTML = `
       <div class="stage-card-priority-strip ${cleanPriority}"></div>
-      <div class="job-card-header" style="margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+      <div class="job-card-header" style="margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; gap: 6px; flex-wrap: wrap;">
         <span class="font-mono font-bold text-cyan" style="font-size: 14px;">${getCleanKpNumber(job.kpNumber)}${getJobJcNo(job) ? ` (${getJobJcNo(job)})` : ""}</span>
-        <span class="badge ${statusClass}" style="font-size: 10px; font-weight: 700;">${job.masking.status}</span>
+        <div style="display: flex; align-items: center; gap: 6px;">
+          ${buildTATChipHTML(job)}
+          <span class="badge ${statusClass}" style="font-size: 10px; font-weight: 700;">${job.masking.status}</span>
+        </div>
       </div>
       <div class="job-card-body" style="font-size: 12px; display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px;">
         <div class="job-card-row">
@@ -4964,6 +5305,13 @@ function renderSprayingLiveQueue() {
     const card = document.createElement("div");
     card.className = "stage-kanban-card";
     
+    const urgency = getTATUrgency(job);
+    if (urgency === "warning") {
+      card.classList.add("job-card-tat-warning");
+    } else if (urgency === "critical") {
+      card.classList.add("job-card-tat-critical");
+    }
+
     let statusClass = "badge-pending";
     let statusText = "Pending";
     if (job.spraying?.status === "In Progress") {
@@ -5002,9 +5350,12 @@ function renderSprayingLiveQueue() {
 
     card.innerHTML = `
       <div class="stage-card-priority-strip ${cleanPriority}"></div>
-      <div class="job-card-header" style="margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+      <div class="job-card-header" style="margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; gap: 6px; flex-wrap: wrap;">
         <span class="font-mono font-bold text-cyan" style="font-size: 14px;">${kpClean}${jcNo ? ` (${jcNo})` : ""}</span>
-        <span class="badge ${statusClass}" style="font-size: 10px; font-weight: 700;">${statusText}</span>
+        <div style="display: flex; align-items: center; gap: 6px;">
+          ${buildTATChipHTML(job)}
+          <span class="badge ${statusClass}" style="font-size: 10px; font-weight: 700;">${statusText}</span>
+        </div>
       </div>
       <div class="job-card-body" style="font-size: 12px; display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px;">
         <div class="job-card-row">
@@ -6545,6 +6896,13 @@ function renderGrindingLiveQueue() {
     const card = document.createElement("div");
     card.className = "stage-kanban-card";
     
+    const urgency = getTATUrgency(job);
+    if (urgency === "warning") {
+      card.classList.add("job-card-tat-warning");
+    } else if (urgency === "critical") {
+      card.classList.add("job-card-tat-critical");
+    }
+    
     let statusClass = "badge-pending";
     if (job.grinding.status === "In Progress") statusClass = "badge-progress";
     else if (job.grinding.status === "Hold") statusClass = "badge-hold";
@@ -6560,9 +6918,12 @@ function renderGrindingLiveQueue() {
 
     card.innerHTML = `
       <div class="stage-card-priority-strip ${cleanPriority}"></div>
-      <div class="job-card-header" style="margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+      <div class="job-card-header" style="margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; gap: 6px; flex-wrap: wrap;">
         <span class="font-mono font-bold text-cyan" style="font-size: 14px;">${getCleanKpNumber(job.kpNumber)}${getJobJcNo(job) ? ` (${getJobJcNo(job)})` : ""}</span>
-        <span class="badge ${statusClass}" style="font-size: 10px; font-weight: 700;">${job.grinding.status}</span>
+        <div style="display: flex; align-items: center; gap: 6px;">
+          ${buildTATChipHTML(job)}
+          <span class="badge ${statusClass}" style="font-size: 10px; font-weight: 700;">${job.grinding.status}</span>
+        </div>
       </div>
       <div class="job-card-body" style="font-size: 12px; display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px;">
         <div class="job-card-row">
@@ -7138,6 +7499,13 @@ function renderPolishingDashboard() {
     card.className = "stage-kanban-card";
     card.draggable = !isReadOnly;
     
+    const urgency = getTATUrgency(job);
+    if (urgency === "warning") {
+      card.classList.add("job-card-tat-warning");
+    } else if (urgency === "critical") {
+      card.classList.add("job-card-tat-critical");
+    }
+    
     if (!isReadOnly) {
       card.addEventListener("dragstart", (e) => {
         e.dataTransfer.setData("text/plain", job.kpNumber);
@@ -7151,9 +7519,12 @@ function renderPolishingDashboard() {
 
     card.innerHTML = `
       <div class="stage-card-priority-strip ${priorityClass}"></div>
-      <div class="job-card-header" style="margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+      <div class="job-card-header" style="margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; gap: 6px; flex-wrap: wrap;">
         <span class="font-mono font-bold text-cyan" style="font-size: 14px;">${getCleanKpNumber(job.kpNumber)}${cleanJc ? ` (${cleanJc})` : ""}</span>
-        <span class="badge badge-normal" style="font-size: 10px; font-weight: 700;">${job.processType}</span>
+        <div style="display: flex; align-items: center; gap: 6px;">
+          ${buildTATChipHTML(job)}
+          <span class="badge badge-normal" style="font-size: 10px; font-weight: 700;">${job.processType}</span>
+        </div>
       </div>
       <div class="job-card-body" style="font-size: 12px; display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px;">
         <div class="job-card-row">

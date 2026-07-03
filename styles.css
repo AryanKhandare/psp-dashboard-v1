@@ -3292,3 +3292,41 @@ body.light-theme .inspection-kanban-board .stage-kanban-card:hover {
   }
 }
 
+/* ── TAT (Turn Around Time) Card Urgency & Glow Styles ── */
+.job-card-tat-warning {
+  background-color: #3f3000 !important; /* Fully dark yellow background */
+  border: 1px solid #eab308 !important;
+  box-shadow: 0 0 10px rgba(234, 179, 8, 0.25) !important;
+}
+.job-card-tat-critical {
+  background-color: #4a0d0d !important; /* Fully dark red background */
+  border: 1px solid #ef4444 !important;
+  box-shadow: 0 0 14px rgba(239, 68, 68, 0.4) !important;
+  animation: pulse-border-red 2s infinite alternate !important;
+}
+
+@keyframes pulse-border-red {
+  0% {
+    box-shadow: 0 0 4px rgba(239, 68, 68, 0.2);
+  }
+  100% {
+    box-shadow: 0 0 16px rgba(239, 68, 68, 0.55);
+  }
+}
+
+/* Light Theme adjustments for TAT card states */
+body.light-theme .job-card-tat-warning {
+  border: 1.5px solid #d97706 !important;
+  background-color: #fef08a !important; /* Soft yellow background */
+}
+body.light-theme .job-card-tat-critical {
+  border: 1.5px solid #dc2626 !important;
+  background-color: #fecaca !important; /* Soft red background */
+}
+
+/* Custom tat chip text adjustments on hover */
+.tat-chip:hover {
+  transform: scale(1.05);
+  transition: transform 0.2s ease;
+}
+

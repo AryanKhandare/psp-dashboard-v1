@@ -282,6 +282,8 @@ function matchesField_(rawH, field) {
       return ["inspectiondate", "createddate"].indexOf(h) !== -1;
     case "receiveddate":
       return ["receiveddate"].indexOf(h) !== -1;
+    case "plannedcompletiondate":
+      return ["plannedcompletiondate", "plannedcompletion", "completiondate", "planneddateofcompletion", "targetdate", "duedate"].indexOf(h) !== -1;
     case "stage":
       return ["stage", "process", "department", "currentdepartment", "currentprocess", "currentstage"].indexOf(h) !== -1;
     case "status":
@@ -350,6 +352,7 @@ function getJobsHandler_(e) {
     let priority = "Normal";
     let inspectionDate = "";
     let receivedDate = "";
+    let plannedCompletionDate = "";
     let currentDepartment = "";
     let status = "Pending";
     let operatorName = "";
@@ -376,6 +379,8 @@ function getJobsHandler_(e) {
         inspectionDate = formatDateValue_(val);
       } else if (matchesField_(cleanKey, "receiveddate")) {
         receivedDate = formatDateValue_(val);
+      } else if (matchesField_(cleanKey, "plannedcompletiondate")) {
+        plannedCompletionDate = formatDateValue_(val);
       } else if (matchesField_(cleanKey, "stage")) {
         currentDepartment = String(val);
       } else if (matchesField_(cleanKey, "status")) {
@@ -397,6 +402,7 @@ function getJobsHandler_(e) {
       priority,
       inspectionDate,
       receivedDate,
+      plannedCompletionDate,
       currentDepartment,
       status,
       operatorName,
@@ -1176,6 +1182,8 @@ function fetchAndCacheInspectionMasterRecords_() {
   let statusCol = 3; // fallback C
   let assignedFirstCol = 22; // fallback V
   let timestampCol = 1; // fallback A
+  let inspDateCol = 23; // fallback W (Planned Date of Inspection / Arrival)
+  let compDateCol = 37; // fallback AK (Planned Date of Completion)
   
   headers.forEach((h, idx) => {
     const cleaned = cleanHeader_(h);
@@ -1193,6 +1201,12 @@ function fetchAndCacheInspectionMasterRecords_() {
     }
     else if (cleaned === "timestamp" || cleaned === "date") {
       timestampCol = colNum;
+    }
+    else if (matchesField_(h, "inspectiondate")) {
+      inspDateCol = colNum;
+    }
+    else if (matchesField_(h, "plannedcompletiondate")) {
+      compDateCol = colNum;
     }
   });
   
@@ -1220,6 +1234,8 @@ function fetchAndCacheInspectionMasterRecords_() {
   const stats = sheet.getRange(startRow, statusCol, dataRowsCount, 1).getValues();
   const firstOps = sheet.getRange(startRow, assignedFirstCol, dataRowsCount, 1).getValues();
   const timestamps = sheet.getRange(startRow, timestampCol, dataRowsCount, 1).getValues();
+  const inspDates = sheet.getRange(startRow, inspDateCol, dataRowsCount, 1).getValues();
+  const compDates = sheet.getRange(startRow, compDateCol, dataRowsCount, 1).getValues();
   
   // 4. Assemble the records
   const records = [];
@@ -1236,6 +1252,8 @@ function fetchAndCacheInspectionMasterRecords_() {
       assignedFirst: String(firstOps[i][0]).trim(),
       assignedSecond: "", // only single operator column exists in FMS sheet
       timestamp: String(timestamps[i][0]).trim(),
+      inspectionDate: formatDateValue_(inspDates[i][0]),
+      plannedCompletionDate: formatDateValue_(compDates[i][0]),
       rowIndex: startRow + i
     });
   }
