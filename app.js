@@ -3556,18 +3556,35 @@ function renderAll() {
   // Update sidebar count indicators
   updateSidebarCounts();
   
-  // Render tabs
-  renderWorkflowOverview();
-  renderInspectionDashboard();
-  renderMaskingDashboard();
-  renderSprayingDashboard();
-  renderGrindingDashboard();
-  renderPolishingDashboard();
-  renderFinalInspectionDashboard();
-  renderDispatchDashboard();
-  renderUserManagement();
-  renderAuditLogs();
-  renderDmdDashboard();
+  const activeTabPane = document.querySelector(".tab-pane.active");
+  const activeTabId = activeTabPane ? activeTabPane.id : "";
+  
+  // Render only the active tab to optimize performance and prevent lagging
+  if (!activeTabId) {
+    renderWorkflowOverview();
+    renderInspectionDashboard();
+    renderMaskingDashboard();
+    renderSprayingDashboard();
+    renderGrindingDashboard();
+    renderPolishingDashboard();
+    renderFinalInspectionDashboard();
+    renderDispatchDashboard();
+    renderUserManagement();
+    renderAuditLogs();
+    renderDmdDashboard();
+  } else {
+    if (activeTabId === "tab-overview") renderWorkflowOverview();
+    else if (activeTabId === "tab-inspection") renderInspectionDashboard();
+    else if (activeTabId === "tab-masking") renderMaskingDashboard();
+    else if (activeTabId === "tab-spraying") renderSprayingDashboard();
+    else if (activeTabId === "tab-grinding") renderGrindingDashboard();
+    else if (activeTabId === "tab-polishing") renderPolishingDashboard();
+    else if (activeTabId === "tab-final-inspection") renderFinalInspectionDashboard();
+    else if (activeTabId === "tab-dispatch") renderDispatchDashboard();
+    else if (activeTabId === "tab-user-management") renderUserManagement();
+    else if (activeTabId === "tab-audit-logs") renderAuditLogs();
+    else if (activeTabId === "tab-data-management") renderDmdDashboard();
+  }
 
   // Render weekly performance reports if active
   const reportsTab = document.getElementById("tab-reports");
@@ -3579,9 +3596,12 @@ function renderAll() {
 
   // Update OEE UI immediately
   ["Masking", "Spraying", "Grinding", "Polishing"].forEach(dept => {
-    const state = loadOeeState(dept);
-    const mode = getOeeCurrentMode(dept);
-    updateOeeUi(dept, state, mode);
+    // Only update OEE UI if the active tab is relevant to this department, or on initial load
+    if (!activeTabId || activeTabId === `tab-${dept.toLowerCase()}`) {
+      const state = loadOeeState(dept);
+      const mode = getOeeCurrentMode(dept);
+      updateOeeUi(dept, state, mode);
+    }
   });
 }
 
@@ -4859,8 +4879,11 @@ function startStateTimer() {
       }
     });
 
+    const activeTabPane = document.querySelector(".tab-pane.active");
+    const activeTabId = activeTabPane ? activeTabPane.id : "";
+
     // 2. If selected masking job is running, refresh the main digital screen
-    if (selectedJobKp) {
+    if (selectedJobKp && activeTabId === "tab-masking") {
       const activeJob = jobs.find(j => j.kpNumber === selectedJobKp);
       if (activeJob) {
         updateTimerReadout(activeJob);
@@ -4870,13 +4893,13 @@ function startStateTimer() {
     }
 
     // 3. If selected grinding/spraying job is running, refresh their digital screens
-    if (selectedGrindingJobKp) {
+    if (selectedGrindingJobKp && activeTabId === "tab-grinding") {
       const activeGrindingJob = jobs.find(j => j.kpNumber === selectedGrindingJobKp);
       if (activeGrindingJob) {
         updateGrindingTimerReadout(activeGrindingJob);
       }
     }
-    if (selectedSprayingJobKp) {
+    if (selectedSprayingJobKp && activeTabId === "tab-spraying") {
       const activeSprayingJob = jobs.find(j => j.kpNumber === selectedSprayingJobKp);
       if (activeSprayingJob) {
         updateSprayingTimerReadout(activeSprayingJob);
@@ -4884,16 +4907,19 @@ function startStateTimer() {
     }
 
     // 4. Keep running cards and panels updating
-    renderActiveJobCards();
-    if (typeof renderGrindingActiveCards === "function") {
+    if (activeTabId === "tab-masking") {
+      renderActiveJobCards();
+    }
+    if (activeTabId === "tab-grinding" && typeof renderGrindingActiveCards === "function") {
       renderGrindingActiveCards();
     }
-    if (typeof renderSprayingActiveCards === "function") {
+    if (activeTabId === "tab-spraying" && typeof renderSprayingActiveCards === "function") {
       renderSprayingActiveCards();
     }
 
     // Real-time card countdown timers update
-    if (typeof updateCardCountdownTimers === "function") {
+    const jobTabs = ["tab-overview", "tab-inspection", "tab-masking", "tab-spraying", "tab-grinding", "tab-polishing", "tab-final-inspection", "tab-dispatch"];
+    if (jobTabs.includes(activeTabId) && typeof updateCardCountdownTimers === "function") {
       updateCardCountdownTimers();
     }
 
@@ -4924,7 +4950,9 @@ function startStateTimer() {
         else if (mode === "ACTIVE") state.active += elapsedSec;
         
         saveOeeState(dept, state);
-        updateOeeUi(dept, state, mode);
+        if (activeTabId === `tab-${dept.toLowerCase()}`) {
+          updateOeeUi(dept, state, mode);
+        }
       });
     }
   }, 1000);
