@@ -2078,6 +2078,7 @@
             <input type="week" id="report-week-select" class="form-input" style="height:32px; width:180px; font-size:12px; border-radius:6px;">
             <button type="button" id="btn-generate-report" class="btn btn-primary btn-xs" style="height:32px; padding:0 16px;">Generate Report</button>
             <button type="button" id="btn-export-pdf" class="btn btn-success btn-xs" style="height:32px; padding:0 16px; display:flex; align-items:center; gap:6px;">📥 Export PDF</button>
+            <button type="button" id="btn-export-excel" class="btn btn-success btn-xs" style="height:32px; padding:0 16px; display:flex; align-items:center; gap:6px; background: linear-gradient(135deg, #10b981 0%, #059669 100%); border: none;">🟢 Export Excel</button>
           </div>
         </div>
 
@@ -2122,10 +2123,10 @@
         <p>You are about to start the Masking Process for <strong id="modal-kp-display" class="text-cyan"></strong>.</p>
         <form id="operator-assign-form" class="industrial-form mt-1">
           <div class="form-group">
-            <label>Select Operator Name (Tap to select):</label>
-            <div id="modal-operator-buttons" class="touch-select-grid">
+            <label>Select Operator Name:</label>
+            <select id="modal-operator-select" class="form-input" style="height: 48px; font-size: 16px; width: 100%; border-radius: 8px; background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border-color); padding: 0 12px;">
               <!-- Dynamically populated in app.js -->
-            </div>
+            </select>
           </div>
           <div class="form-actions mt-1" style="flex-direction: column; gap: 15px;">
             <button type="submit" class="btn btn-success btn-tablet-primary">Start Masking Cycle</button>

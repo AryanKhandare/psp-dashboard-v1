@@ -377,6 +377,301 @@ function closeTATPopup() {
 }
 window.closeTATPopup = closeTATPopup;
 
+// ── OPERATOR ROUTING & RESPONSE TIME LIMITS ──
+
+let _forwardCheckTicks = 0;
+
+function getStageStartLimitMs(deptName) {
+  const cleanDept = deptName.trim().toLowerCase();
+  if (cleanDept === "masking") return 4 * 60 * 60 * 1000;   // 4 hours
+  if (cleanDept === "spraying") return 24 * 60 * 60 * 1000; // 24 hours
+  return null; // Don't assign time limit for grinding, polishing, etc.
+}
+
+function getOperatorsForDepartment(deptName) {
+  const cleanDept = deptName.trim().toLowerCase();
+  // Filter registered users who are operators in this department
+  const allUsers = (typeof users !== "undefined" && Array.isArray(users)) ? users : [];
+  let deptOps = allUsers
+    .filter(u => u.role === "operator" && u.department && u.department.trim().toLowerCase() === cleanDept)
+    .map(u => u.name || u.email.split("@")[0]);
+
+  if (deptOps.length === 0) {
+    if (cleanDept === "masking") return ["Sameer", "Tripati", "SJ", "DN", "Vikrant"];
+    if (cleanDept === "spraying") return ["GN", "Vikrant", "TJ"];
+    if (cleanDept === "grinding") return ["Dhuryodhan", "Vikrant"];
+    return ["Operator"];
+  }
+  return deptOps;
+}
+
+function getNextOperatorForDepartment(currentOpName, deptName) {
+  const ops = getOperatorsForDepartment(deptName);
+  if (ops.length === 0) return "";
+  if (!currentOpName) return ops[0];
+  const cleanCurrent = currentOpName.trim().toLowerCase();
+  const index = ops.findIndex(name => name.trim().toLowerCase() === cleanCurrent);
+  if (index === -1) return ops[0];
+  return ops[(index + 1) % ops.length];
+}
+
+function getNextRoundRobinOperator(deptName) {
+  const ops = getOperatorsForDepartment(deptName);
+  if (ops.length === 0) return "";
+  const cleanDept = deptName.toLowerCase().replace(/[^a-z]/g, "");
+  const counts = {};
+  ops.forEach(op => counts[op.toLowerCase()] = 0);
+  
+  if (Array.isArray(jobs)) {
+    jobs.forEach(j => {
+      if (j.currentDepartment.toLowerCase().replace(/[^a-z]/g, "") === cleanDept) {
+        const opName = (j[cleanDept] && j[cleanDept].operatorName) || "";
+        if (opName && counts[opName.toLowerCase()] !== undefined) {
+          counts[opName.toLowerCase()]++;
+        }
+      }
+    });
+  }
+
+  let minOp = ops[0];
+  let minCount = Infinity;
+  ops.forEach(op => {
+    if (counts[op.toLowerCase()] < minCount) {
+      minCount = counts[op.toLowerCase()];
+      minOp = op;
+    }
+  });
+  return minOp;
+}
+
+function autoAssignPendingJobs() {
+  const prodStages = ["Masking", "Spraying", "Grinding", "Polishing"];
+  let updated = false;
+  if (!Array.isArray(jobs)) return;
+  
+  jobs.forEach(job => {
+    if (prodStages.includes(job.currentDepartment)) {
+      const stageKey = job.currentDepartment.toLowerCase().replace(/[^a-z]/g, "");
+      if (job[stageKey]) {
+        const currentOp = (job[stageKey].operatorName || "").trim();
+        const validOps = getOperatorsForDepartment(job.currentDepartment);
+        
+        const isGenericOrInvalid = !currentOp || 
+          currentOp.toLowerCase() === "masking" || 
+          currentOp.toLowerCase() === "spraying" || 
+          currentOp.toLowerCase() === "grinding" || 
+          currentOp.toLowerCase() === "polishing" || 
+          currentOp.toLowerCase() === "operator" ||
+          !validOps.some(op => op.toLowerCase() === currentOp.toLowerCase());
+
+        if (isGenericOrInvalid) {
+          const assignedOp = getNextRoundRobinOperator(job.currentDepartment);
+          job[stageKey].operatorName = assignedOp;
+          job.stageAssignedAt = job.stageAssignedAt || {};
+          if (!job.stageAssignedAt[stageKey]) {
+            job.stageAssignedAt[stageKey] = new Date().toISOString();
+          }
+          // Sync queueEntryTime for weekly reports
+          job[stageKey].queueEntryTime = job.stageAssignedAt[stageKey];
+          updated = true;
+          if (!isMockMode() && job.id) {
+            const db = firebase.firestore();
+            const updates = {};
+            updates[`${stageKey}.operatorName`] = assignedOp;
+            updates[`stageAssignedAt.${stageKey}`] = job.stageAssignedAt[stageKey];
+            updates[`${stageKey}.queueEntryTime`] = job.stageAssignedAt[stageKey];
+            db.collection("jobs").doc(job.id).update(updates).catch(e => console.error("Firestore auto-assign err:", e));
+          }
+        }
+      }
+    }
+  });
+  if (updated && isMockMode()) saveState();
+}
+
+function recordLateStartPenalty(operatorName, department, kpNo) {
+  const allUsers = (typeof users !== "undefined" && Array.isArray(users)) ? users : [];
+  const targetUser = allUsers.find(u => {
+    const cleanName = (u.name || "").trim().toLowerCase();
+    const cleanEmail = (u.email || "").split("@")[0].trim().toLowerCase();
+    const cleanOp = operatorName.trim().toLowerCase();
+    return cleanName === cleanOp || cleanEmail === cleanOp;
+  });
+
+  if (!targetUser) return;
+  const currentPenalties = Number(targetUser.lateStartPenalties || 0) + 1;
+  targetUser.lateStartPenalties = currentPenalties;
+
+  if (!isMockMode() && targetUser.uid) {
+    const db = firebase.firestore();
+    db.collection("users").doc(targetUser.uid).update({ lateStartPenalties: currentPenalties }).catch(e => console.error("Firestore user penalty update err:", e));
+  } else {
+    saveState();
+  }
+}
+
+function checkAndAutoForwardJobs() {
+  const prodStages = ["Masking", "Spraying", "Grinding", "Polishing"];
+  const now = new Date();
+  let updated = false;
+  if (!Array.isArray(jobs)) return;
+
+  jobs.forEach(job => {
+    if (!prodStages.includes(job.currentDepartment)) return;
+    const stageKey = job.currentDepartment.toLowerCase().replace(/[^a-z]/g, "");
+    if (!job[stageKey] || job[stageKey].status !== "Pending") return;
+
+    let arrivalTimeStr = job.stageAssignedAt && job.stageAssignedAt[stageKey];
+    if (!arrivalTimeStr) {
+      job.stageAssignedAt = job.stageAssignedAt || {};
+      job.stageAssignedAt[stageKey] = now.toISOString();
+      arrivalTimeStr = job.stageAssignedAt[stageKey];
+      job[stageKey].queueEntryTime = arrivalTimeStr;
+      updated = true;
+    }
+
+    const elapsedMs = now - new Date(arrivalTimeStr);
+    const limitMs = getStageStartLimitMs(job.currentDepartment);
+
+    // If no limit is assigned (like Grinding/Polishing), skip auto-forwarding checks
+    if (limitMs === null) return;
+
+    if (elapsedMs >= limitMs) {
+      const currentOp = job[stageKey].operatorName || "";
+      const nextOp = getNextOperatorForDepartment(currentOp, job.currentDepartment);
+      
+      job[stageKey].operatorName = nextOp;
+      job.stageAssignedAt[stageKey] = now.toISOString();
+      job[stageKey].queueEntryTime = now.toISOString();
+      updated = true;
+      
+      createAuditLog("System", job.currentDepartment, job.kpNumber, "Auto-Forwarded", 
+        `Job auto-forwarded from ${currentOp || "unassigned"} to ${nextOp} (time limit of ${limitMs / 3600000}h exceeded).`);
+      
+      if (currentOp) {
+        recordLateStartPenalty(currentOp, job.currentDepartment, job.kpNumber);
+      }
+      
+      if (!isMockMode() && job.id) {
+        const db = firebase.firestore();
+        const updates = {};
+        updates[`${stageKey}.operatorName`] = nextOp;
+        updates[`stageAssignedAt.${stageKey}`] = job.stageAssignedAt[stageKey];
+        updates[`${stageKey}.queueEntryTime`] = job.stageAssignedAt[stageKey];
+        db.collection("jobs").doc(job.id).update(updates).catch(e => console.error("Firestore auto-forward err:", e));
+      }
+    }
+  });
+
+  if (updated && isMockMode()) {
+    saveState();
+    renderAll();
+  }
+}
+
+function getLoggedOperatorName() {
+  if (!currentUser) return "";
+  if (currentUser.name && currentUser.name.trim() !== "") {
+    return currentUser.name.trim();
+  }
+  if (currentUser.email) {
+    return currentUser.email.split("@")[0];
+  }
+  return "";
+}
+
+function buildCardArrivalTimerHTML(job) {
+  const prodStages = ["Masking", "Spraying", "Grinding", "Polishing"];
+  if (!prodStages.includes(job.currentDepartment)) return "";
+  const stageKey = job.currentDepartment.toLowerCase().replace(/[^a-z]/g, "");
+  return `
+    <div class="tat-countdown-container" data-kp="${job.kpNumber}" style="margin-top: 8px;">
+      <div style="font-size: 11px; display: flex; justify-content: space-between; align-items: center; border-top: 1px dashed rgba(255, 255, 255, 0.08); padding-top: 6px;">
+        <span class="tat-timer-label" style="color: var(--text-label);">Arrived: --:--</span>
+        <span class="tat-timer-value" style="color: var(--text-muted);">⏱ Loading...</span>
+      </div>
+    </div>
+  `;
+}
+
+function updateCardCountdownTimers() {
+  const elements = document.querySelectorAll(".tat-countdown-container");
+  elements.forEach(el => {
+    const kpNo = el.getAttribute("data-kp");
+    const job = jobs.find(j => j.kpNumber === kpNo);
+    if (!job) return;
+    
+    const prodStages = ["Masking", "Spraying", "Grinding", "Polishing"];
+    if (!prodStages.includes(job.currentDepartment)) return;
+    
+    const stageKey = job.currentDepartment.toLowerCase().replace(/[^a-z]/g, "");
+    const arrivalTimeStr = job.stageAssignedAt && job.stageAssignedAt[stageKey];
+    if (!arrivalTimeStr) return;
+    
+    const arrivalTime = new Date(arrivalTimeStr);
+    const now = new Date();
+    const limitMs = getStageStartLimitMs(job.currentDepartment);
+    
+    const elapsedMs = now - arrivalTime;
+    
+    const labelEl = el.querySelector(".tat-timer-label");
+    const valueEl = el.querySelector(".tat-timer-value");
+    if (!labelEl || !valueEl) return;
+    
+    // Format arrival time nicely (HH:MM)
+    const timeStr = arrivalTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    labelEl.textContent = `Arrived: ${timeStr}`;
+    
+    if (job[stageKey] && job[stageKey].status !== "Pending") {
+      // Started
+      if (job[stageKey].startTime) {
+        const start = new Date(job[stageKey].startTime);
+        const tookMs = start - arrivalTime;
+        const tookHours = Math.floor(tookMs / 3600000);
+        const tookMins = Math.floor((tookMs % 3600000) / 60000);
+        valueEl.textContent = `⏱ Started in ${tookHours}h ${tookMins}m`;
+        valueEl.style.color = "var(--status-completed)";
+        valueEl.style.animation = "none";
+      } else {
+        valueEl.textContent = `⏱ Active`;
+        valueEl.style.color = "var(--text-highlight)";
+        valueEl.style.animation = "none";
+      }
+    } else {
+      // Pending
+      if (limitMs === null) {
+        // No limit assigned, just show elapsed time since arrival
+        const hours = Math.floor(elapsedMs / 3600000);
+        const mins = Math.floor((elapsedMs % 3600000) / 60000);
+        valueEl.textContent = `⏱ Waiting ${hours}h ${mins}m`;
+        valueEl.style.color = "var(--text-muted)";
+        valueEl.style.animation = "none";
+      } else {
+        const remainingMs = limitMs - elapsedMs;
+        if (remainingMs > 0) {
+          const h = Math.floor(remainingMs / 3600000);
+          const m = Math.floor((remainingMs % 3600000) / 60000);
+          valueEl.textContent = `⏱ Start in ${h}h ${m}m`;
+          if (remainingMs < 60 * 60 * 1000) {
+            valueEl.style.color = "var(--status-pending)";
+            valueEl.style.animation = "pulse-text-orange 1s infinite alternate";
+          } else {
+            valueEl.style.color = "var(--text-muted)";
+            valueEl.style.animation = "none";
+          }
+        } else {
+          const overMs = Math.abs(remainingMs);
+          const h = Math.floor(overMs / 3600000);
+          const m = Math.floor((overMs % 3600000) / 60000);
+          valueEl.textContent = `⚠️ Overdue by ${h}h ${m}m`;
+          valueEl.style.color = "var(--status-hold)";
+          valueEl.style.animation = "pulse-text-red 1s infinite alternate";
+        }
+      }
+    }
+  });
+}
+
 /**
  * Check TAT alerts for all production-stage jobs (called from renderAll)
  * Fires a one-time red alert toast per session for critical jobs
@@ -2440,6 +2735,9 @@ function startFirestoreListeners() {
       });
       
       jobs = tempJobs;
+      if (typeof autoAssignPendingJobs === "function") {
+        autoAssignPendingJobs();
+      }
       renderAll();
     }, err => {
       console.error("Jobs listener error:", err);
@@ -2645,6 +2943,44 @@ async function seedFirestoreDatabaseIfEmpty() {
         batch.set(ref, m);
       });
       await batch.commit();
+    }
+
+    // Seeding individual operators into Firestore users collection
+    const opsToSeed = [
+      { name: "SJ", email: "sj.masking@plasmaspray.co.in", role: "operator", department: "Masking", pin: "500001" },
+      { name: "DN", email: "dn.masking@plasmaspray.co.in", role: "operator", department: "Masking", pin: "500002" },
+      { name: "Tripati", email: "tripati.masking@plasmaspray.co.in", role: "operator", department: "Masking", pin: "500003" },
+      { name: "GN", email: "gn.masking@plasmaspray.co.in", role: "operator", department: "Masking", pin: "500004" },
+      { name: "Vikrant", email: "vikrant.masking@plasmaspray.co.in", role: "operator", department: "Masking", pin: "500005" },
+      { name: "Sameer", email: "sameer.masking@plasmaspray.co.in", role: "operator", department: "Masking", pin: "500006" },
+      { name: "Dhuryodhan", email: "dhuryodhan.masking@plasmaspray.co.in", role: "operator", department: "Masking", pin: "500007" },
+      { name: "TJ", email: "tj.masking@plasmaspray.co.in", role: "operator", department: "Masking", pin: "500008" },
+      
+      { name: "prism", email: "prism.spraying@plasmaspray.co.in", role: "operator", department: "Spraying", pin: "600001" },
+      { name: "Suraj", email: "suraj.spraying@plasmaspray.co.in", role: "operator", department: "Spraying", pin: "600002" },
+      { name: "Amrish", email: "amrish.spraying@plasmaspray.co.in", role: "operator", department: "Spraying", pin: "600003" },
+      { name: "Duryodhan", email: "duryodhan.spraying@plasmaspray.co.in", role: "operator", department: "Spraying", pin: "600004" },
+      { name: "TJ", email: "tj.spraying@plasmaspray.co.in", role: "operator", department: "Spraying", pin: "600005" },
+      { name: "Bhushan", email: "bhushan.spraying@plasmaspray.co.in", role: "operator", department: "Spraying", pin: "600006" },
+      { name: "Avinash", email: "avinash.spraying@plasmaspray.co.in", role: "operator", department: "Spraying", pin: "600007" }
+    ];
+
+    for (const op of opsToSeed) {
+      const q = await db.collection("users").where("email", "==", op.email).get();
+      if (q.empty) {
+        const docId = `op-${op.name.toLowerCase().replace(/[^a-z0-9]/g, "")}-${op.department.toLowerCase()}`;
+        await db.collection("users").doc(docId).set({
+          uid: docId,
+          name: op.name,
+          email: op.email,
+          role: op.role,
+          department: op.department,
+          pin: op.pin,
+          active: true,
+          emailVerified: true
+        });
+        console.log(`[Firestore Seed] Auto-created operator record for: ${op.name} (${op.email})`);
+      }
     }
   } catch (err) {
     console.error("Firestore DB seeding error:", err);
@@ -4357,6 +4693,7 @@ function renderLiveJobQueue() {
           <span class="job-card-label">Priority:</span>
           <span class="job-card-value font-bold text-cyan">${job.priority}</span>
         </div>
+        ${buildCardArrivalTimerHTML(job)}
       </div>
       <div class="stage-card-actions" style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 10px; display: flex; flex-direction: column; gap: 8px;">
         ${actionButton}
@@ -4544,6 +4881,23 @@ function startStateTimer() {
     }
     if (typeof renderSprayingActiveCards === "function") {
       renderSprayingActiveCards();
+    }
+
+    // Real-time card countdown timers update
+    if (typeof updateCardCountdownTimers === "function") {
+      updateCardCountdownTimers();
+    }
+
+    // Periodically run auto-assignment and forwarding checks every 10 seconds
+    _forwardCheckTicks = (_forwardCheckTicks || 0) + 1;
+    if (_forwardCheckTicks >= 10) {
+      _forwardCheckTicks = 0;
+      if (typeof checkAndAutoForwardJobs === "function") {
+        checkAndAutoForwardJobs();
+      }
+      if (typeof autoAssignPendingJobs === "function") {
+        autoAssignPendingJobs();
+      }
     }
 
     // 5. OEE metrics background timer update
@@ -5341,10 +5695,11 @@ function renderSprayingLiveQueue() {
       </div>
     ` : "";
 
-    const assignedOpHtml = job.assignedOperator ? `
+    const opDisplay = (job.spraying && job.spraying.operatorName) || job.assignedOperator || "";
+    const assignedOpHtml = opDisplay ? `
       <div class="job-card-row">
         <span class="job-card-label">Operator:</span>
-        <span class="job-card-value font-bold text-cyan">${job.assignedOperator}</span>
+        <span class="job-card-value font-bold text-cyan">${opDisplay}</span>
       </div>
     ` : "";
 
@@ -5380,6 +5735,7 @@ function renderSprayingLiveQueue() {
           <span class="job-card-label">Priority:</span>
           <span class="job-card-value font-bold text-cyan">${job.priority}</span>
         </div>
+        ${buildCardArrivalTimerHTML(job)}
       </div>
       <div class="stage-card-actions" style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 10px; display: flex; flex-direction: column; gap: 8px;">
         ${actionButton}
@@ -6148,7 +6504,7 @@ function renderAuditLogs() {
 function openAssignModal(kpNumber) {
   const modal = document.getElementById("modal-assign-operator");
   const kpDisplay = document.getElementById("modal-kp-display");
-  const opButtonsContainer = document.getElementById("modal-operator-buttons");
+  const opSelect = document.getElementById("modal-operator-select");
   
   kpDisplay.textContent = kpNumber;
 
@@ -6157,58 +6513,62 @@ function openAssignModal(kpNumber) {
   if (logged && logged.name && !logged.name.toLowerCase().includes("admin") && !logged.name.includes("@")) {
     selectedOperatorName = logged.name;
   } else {
-    selectedOperatorName = null;
+    selectedOperatorName = "";
   }
   selectedShiftName = logged ? (logged.shift || "A Shift") : "A Shift";
 
-  // Render Operator Touch Buttons
-  opButtonsContainer.innerHTML = "";
-  const presetNames = ["SJ", "DN", "Tripati", "GN", "Vikrant", "Sameer", "Dhuryodhan", "TJ"];
-  
-  presetNames.forEach(name => {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "touch-select-btn";
-    if (name === selectedOperatorName) {
-      btn.classList.add("active");
-    }
-    btn.textContent = name;
-    btn.addEventListener("click", () => {
-      opButtonsContainer.querySelectorAll(".touch-select-btn").forEach(b => b.classList.remove("active"));
-      btn.classList.add("active");
-      selectedOperatorName = name;
-    });
-    opButtonsContainer.appendChild(btn);
-  });
-
-  // "Others" operator button
-  const otherBtn = document.createElement("button");
-  otherBtn.type = "button";
-  otherBtn.className = "touch-select-btn";
-  
-  const isPresetActive = presetNames.includes(selectedOperatorName);
-  if (selectedOperatorName && !isPresetActive) {
-    otherBtn.classList.add("active");
-    otherBtn.textContent = `Others (${selectedOperatorName})`;
-  } else {
-    otherBtn.textContent = "Others";
-  }
-
-  otherBtn.addEventListener("click", () => {
-    const manualName = prompt("Please enter the operator name manually:");
-    if (manualName && manualName.trim()) {
-      const trimmed = manualName.trim();
-      opButtonsContainer.querySelectorAll(".touch-select-btn").forEach(b => b.classList.remove("active"));
-      otherBtn.classList.add("active");
-      otherBtn.textContent = `Others (${trimmed})`;
-      selectedOperatorName = trimmed;
-    } else {
-      if (!selectedOperatorName) {
-        alert("Please select an operator or enter a name via 'Others'.");
+  // Populate Operator Dropdown
+  if (opSelect) {
+    opSelect.innerHTML = "";
+    
+    // Default option
+    const defaultOpt = document.createElement("option");
+    defaultOpt.value = "";
+    defaultOpt.textContent = "-- Select Operator --";
+    opSelect.appendChild(defaultOpt);
+    
+    const presetNames = ["SJ", "DN", "Tripati", "GN", "Vikrant", "Sameer", "Dhuryodhan", "TJ"];
+    presetNames.forEach(name => {
+      const opt = document.createElement("option");
+      opt.value = name;
+      opt.textContent = name;
+      if (name.toLowerCase() === (selectedOperatorName || "").toLowerCase()) {
+        opt.selected = true;
+        selectedOperatorName = name;
       }
+      opSelect.appendChild(opt);
+    });
+    
+    // Add Others option
+    const otherOpt = document.createElement("option");
+    otherOpt.value = "others";
+    otherOpt.textContent = "Others...";
+    if (selectedOperatorName && !presetNames.some(n => n.toLowerCase() === selectedOperatorName.toLowerCase())) {
+      otherOpt.selected = true;
+      otherOpt.textContent = `Others (${selectedOperatorName})`;
+      otherOpt.value = selectedOperatorName;
     }
-  });
-  opButtonsContainer.appendChild(otherBtn);
+    opSelect.appendChild(otherOpt);
+    
+    opSelect.onchange = () => {
+      const val = opSelect.value;
+      if (val === "others") {
+        const manualName = prompt("Please enter the operator name manually:");
+        if (manualName && manualName.trim()) {
+          const trimmed = manualName.trim();
+          selectedOperatorName = trimmed;
+          otherOpt.textContent = `Others (${trimmed})`;
+          otherOpt.value = trimmed;
+          otherOpt.selected = true;
+        } else {
+          opSelect.value = "";
+          selectedOperatorName = "";
+        }
+      } else {
+        selectedOperatorName = val;
+      }
+    };
+  }
 
   // Shift Buttons highlights
   const shiftContainer = document.getElementById("modal-shift-buttons");
@@ -6966,6 +7326,7 @@ function renderGrindingLiveQueue() {
           <span class="job-card-label">Priority:</span>
           <span class="job-card-value font-bold text-cyan">${job.priority}</span>
         </div>
+        ${buildCardArrivalTimerHTML(job)}
       </div>
       <div class="stage-card-actions" style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 10px; display: flex; flex-direction: column; gap: 8px;">
         ${actionButton}
@@ -7484,7 +7845,11 @@ function renderPolishingDashboard() {
   if (!container) return;
   container.innerHTML = "";
   
-  const polishingJobs = jobs.filter(j => j.currentDepartment === "Polishing");
+  const polishingJobs = jobs.filter(j => {
+    if (j.currentDepartment !== "Polishing") return false;
+    return true;
+  });
+
   if (polishingJobs.length === 0) {
     container.innerHTML = `<div class="no-selection-message" style="grid-column: 1 / -1; width: 100%;">No components in polishing stage.</div>`;
     return;
@@ -7543,6 +7908,13 @@ function renderPolishingDashboard() {
           <span class="job-card-label">Status:</span>
           <span class="job-card-value"><span class="badge badge-pending">Polishing Pending</span></span>
         </div>
+        ${(job.polishing && job.polishing.operatorName) ? `
+        <div class="job-card-row">
+          <span class="job-card-label">Operator:</span>
+          <span class="job-card-value font-bold text-cyan">${job.polishing.operatorName}</span>
+        </div>
+        ` : ''}
+        ${buildCardArrivalTimerHTML(job)}
       </div>
       <div class="stage-card-actions" style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 10px; display: flex; flex-direction: column; gap: 8px;">
         <button class="btn btn-success btn-xs" style="width:100%; height:32px; ${isReadOnly ? 'display:none;' : ''}" onclick="triggerPolishingFloatingTransition('${job.kpNumber}')">Complete & Push Job</button>

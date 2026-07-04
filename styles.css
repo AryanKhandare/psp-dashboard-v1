@@ -3330,3 +3330,13 @@ body.light-theme .job-card-tat-critical {
   transition: transform 0.2s ease;
 }
 
+@keyframes pulse-text-orange {
+  0% { opacity: 0.7; }
+  100% { opacity: 1; text-shadow: 0 0 4px rgba(249, 115, 22, 0.4); }
+}
+
+@keyframes pulse-text-red {
+  0% { opacity: 0.7; }
+  100% { opacity: 1; text-shadow: 0 0 5px rgba(239, 68, 68, 0.5); }
+}
+

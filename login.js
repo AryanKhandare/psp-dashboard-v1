@@ -44,6 +44,7 @@ function isMockMode() {
 const MOCK_DB = {
   init() {
     if (!localStorage.getItem('mock_db_users') || 
+        !localStorage.getItem('mock_db_users').includes("sj.masking@plasmaspray.co.in") ||
         !localStorage.getItem('mock_db_users').includes("gt@plasmaspray.co.in") || 
         localStorage.getItem('mock_db_users').includes('"email":"vg@plasmaspray.co.in","role":"operator"') ||
         !localStorage.getItem('mock_db_users').includes('"pin":')) {
@@ -62,7 +63,26 @@ const MOCK_DB = {
         { uid: "uid-sj-operator", email: "sj@plasmaspray.co.in", role: "quality_admin", department: "Inspection", active: true, emailVerified: true, pin: "123456" },
         { uid: "uid-jn-operator", email: "jn@plasmaspray.co.in", role: "quality_admin", department: "Inspection", active: true, emailVerified: true, pin: "123456" },
         { uid: "uid-laxmi-operator", email: "laxmi@plasmaspray.co.in", role: "quality_admin", department: "Inspection", active: true, emailVerified: true, pin: "123456" },
-        { uid: "uid-suspended", email: "inactive@plasmaspray.co.in", role: "operator", department: "Masking", active: false, emailVerified: true, pin: "123456" }
+        { uid: "uid-suspended", email: "inactive@plasmaspray.co.in", role: "operator", department: "Masking", active: false, emailVerified: true, pin: "123456" },
+        
+        // Masking Operators
+        { uid: "uid-sj-masking", name: "SJ", email: "sj.masking@plasmaspray.co.in", role: "operator", department: "Masking", active: true, emailVerified: true, pin: "500001" },
+        { uid: "uid-dn-masking", name: "DN", email: "dn.masking@plasmaspray.co.in", role: "operator", department: "Masking", active: true, emailVerified: true, pin: "500002" },
+        { uid: "uid-tripati-masking", name: "Tripati", email: "tripati.masking@plasmaspray.co.in", role: "operator", department: "Masking", active: true, emailVerified: true, pin: "500003" },
+        { uid: "uid-gn-masking", name: "GN", email: "gn.masking@plasmaspray.co.in", role: "operator", department: "Masking", active: true, emailVerified: true, pin: "500004" },
+        { uid: "uid-vikrant-masking", name: "Vikrant", email: "vikrant.masking@plasmaspray.co.in", role: "operator", department: "Masking", active: true, emailVerified: true, pin: "500005" },
+        { uid: "uid-sameer-masking", name: "Sameer", email: "sameer.masking@plasmaspray.co.in", role: "operator", department: "Masking", active: true, emailVerified: true, pin: "500006" },
+        { uid: "uid-dhuryodhan-masking", name: "Dhuryodhan", email: "dhuryodhan.masking@plasmaspray.co.in", role: "operator", department: "Masking", active: true, emailVerified: true, pin: "500007" },
+        { uid: "uid-tj-masking", name: "TJ", email: "tj.masking@plasmaspray.co.in", role: "operator", department: "Masking", active: true, emailVerified: true, pin: "500008" },
+        
+        // Spraying Operators
+        { uid: "uid-prism-spraying", name: "prism", email: "prism.spraying@plasmaspray.co.in", role: "operator", department: "Spraying", active: true, emailVerified: true, pin: "600001" },
+        { uid: "uid-suraj-spraying", name: "Suraj", email: "suraj.spraying@plasmaspray.co.in", role: "operator", department: "Spraying", active: true, emailVerified: true, pin: "600002" },
+        { uid: "uid-amrish-spraying", name: "Amrish", email: "amrish.spraying@plasmaspray.co.in", role: "operator", department: "Spraying", active: true, emailVerified: true, pin: "600003" },
+        { uid: "uid-duryodhan-spraying", name: "Duryodhan", email: "duryodhan.spraying@plasmaspray.co.in", role: "operator", department: "Spraying", active: true, emailVerified: true, pin: "600004" },
+        { uid: "uid-tj-spraying", name: "TJ", email: "tj.spraying@plasmaspray.co.in", role: "operator", department: "Spraying", active: true, emailVerified: true, pin: "600005" },
+        { uid: "uid-bhushan-spraying", name: "Bhushan", email: "bhushan.spraying@plasmaspray.co.in", role: "operator", department: "Spraying", active: true, emailVerified: true, pin: "600006" },
+        { uid: "uid-avinash-spraying", name: "Avinash", email: "avinash.spraying@plasmaspray.co.in", role: "operator", department: "Spraying", active: true, emailVerified: true, pin: "600007" }
       ];
       localStorage.setItem('mock_db_users', JSON.stringify(seedUsers));
       
@@ -81,7 +101,24 @@ const MOCK_DB = {
         "sj@plasmaspray.co.in": "123456",
         "jn@plasmaspray.co.in": "123456",
         "laxmi@plasmaspray.co.in": "123456",
-        "inactive@plasmaspray.co.in": "123456"
+        "inactive@plasmaspray.co.in": "123456",
+        
+        "sj.masking@plasmaspray.co.in": "500001",
+        "dn.masking@plasmaspray.co.in": "500002",
+        "tripati.masking@plasmaspray.co.in": "500003",
+        "gn.masking@plasmaspray.co.in": "500004",
+        "vikrant.masking@plasmaspray.co.in": "500005",
+        "sameer.masking@plasmaspray.co.in": "500006",
+        "dhuryodhan.masking@plasmaspray.co.in": "500007",
+        "tj.masking@plasmaspray.co.in": "500008",
+        
+        "prism.spraying@plasmaspray.co.in": "600001",
+        "suraj.spraying@plasmaspray.co.in": "600002",
+        "amrish.spraying@plasmaspray.co.in": "600003",
+        "duryodhan.spraying@plasmaspray.co.in": "600004",
+        "tj.spraying@plasmaspray.co.in": "600005",
+        "bhushan.spraying@plasmaspray.co.in": "600006",
+        "avinash.spraying@plasmaspray.co.in": "600007"
       };
       localStorage.setItem('mock_db_passwords', JSON.stringify(seedPasswords));
     }
@@ -149,7 +186,7 @@ function showLoginScreen() {
   document.getElementById("btn-submit-login").disabled = false;
   
   // Reselect login tab
-  document.getElementById("tab-login").click();
+  document.getElementById("tab-operator").click();
 }
 
 // Resend verification email
@@ -266,18 +303,28 @@ async function handleAuthAction(email, password, confirmPassword, role, departme
 
   if (isMockMode()) {
     // ==================== MOCK AUTH ====================
-    if (state.mode === 'login') {
+    if (state.mode === 'operator' || state.mode === 'login') {
       statusText.textContent = "Verifying credentials...";
       setTimeout(() => {
         const users = MOCK_DB.getUsers();
-        // Find user by PIN only
-        const user = users.find(u => u.pin === password);
-        
-        if (!user) {
-          showErrorState("Invalid Security PIN.");
-          return;
+        let user;
+        if (state.mode === 'operator') {
+          const selectedDept = document.getElementById("login-op-dept").value;
+          const selectedName = document.getElementById("login-op-name").value;
+          user = users.find(u => u.role === 'operator' && u.department.toLowerCase() === selectedDept.toLowerCase() && u.name.toLowerCase() === selectedName.toLowerCase());
+          if (!user || user.pin !== password) {
+            showErrorState("Invalid Security PIN for selected Operator.");
+            return;
+          }
+        } else {
+          // Find user by PIN only
+          user = users.find(u => u.pin === password);
+          if (!user) {
+            showErrorState("Invalid Security PIN.");
+            return;
+          }
         }
-
+        
         // Check verification status
         if (!user.emailVerified) {
           pendingVerifyUserEmail = user.email;
@@ -361,7 +408,7 @@ async function handleAuthAction(email, password, confirmPassword, role, departme
     try {
       const db = firebase.firestore();
       
-      if (state.mode === 'login') {
+      if (state.mode === 'operator' || state.mode === 'login') {
         statusText.textContent = "Connecting to lookup gateway...";
         
         // Ensure temporary auth to query Firestore
@@ -369,21 +416,44 @@ async function handleAuthAction(email, password, confirmPassword, role, departme
           await firebase.auth().signInAnonymously();
         }
         
-        statusText.textContent = "Finding account associated with PIN...";
+        statusText.textContent = "Finding account associated with login details...";
         
-        // 1. Find user in Firestore by PIN
-        const querySnapshot = await db.collection("users").where("pin", "==", password).get();
-        if (querySnapshot.empty) {
-          // Clean up temp session
-          if (firebase.auth().currentUser && firebase.auth().currentUser.isAnonymous) {
-            await firebase.auth().signOut();
+        let userProfile = null;
+        let userDoc = null;
+
+        if (state.mode === 'operator') {
+          const selectedDept = document.getElementById("login-op-dept").value;
+          const selectedName = document.getElementById("login-op-name").value;
+          const querySnapshot = await db.collection("users")
+            .where("role", "==", "operator")
+            .where("department", "==", selectedDept)
+            .where("name", "==", selectedName)
+            .get();
+            
+          if (querySnapshot.empty || querySnapshot.docs[0].data().pin !== password) {
+            if (firebase.auth().currentUser && firebase.auth().currentUser.isAnonymous) {
+              await firebase.auth().signOut();
+            }
+            showErrorState("Invalid Security PIN for selected Operator.");
+            return;
           }
-          showErrorState("Invalid Security PIN.");
-          return;
+          userDoc = querySnapshot.docs[0];
+          userProfile = userDoc.data();
+        } else {
+          // 1. Find user in Firestore by PIN
+          const querySnapshot = await db.collection("users").where("pin", "==", password).get();
+          if (querySnapshot.empty) {
+            // Clean up temp session
+            if (firebase.auth().currentUser && firebase.auth().currentUser.isAnonymous) {
+              await firebase.auth().signOut();
+            }
+            showErrorState("Invalid Security PIN.");
+            return;
+          }
+          userDoc = querySnapshot.docs[0];
+          userProfile = userDoc.data();
         }
 
-        const userDoc = querySnapshot.docs[0];
-        const userProfile = userDoc.data();
         const resolvedEmail = userProfile.email;
 
         // Sign out of anonymous session before authenticating real user
@@ -394,7 +464,22 @@ async function handleAuthAction(email, password, confirmPassword, role, departme
         // 2. Perform standard sign-in using email and hashed PIN
         statusText.textContent = "Connecting to Authentication server...";
         const firebasePassword = await hashPin(resolvedEmail, password);
-        const userCredential = await firebase.auth().signInWithEmailAndPassword(resolvedEmail, firebasePassword);
+        let userCredential;
+        try {
+          userCredential = await firebase.auth().signInWithEmailAndPassword(resolvedEmail, firebasePassword);
+        } catch (authError) {
+          if (authError.code === "auth/user-not-found") {
+            statusText.textContent = "Registering operator security profile...";
+            userCredential = await firebase.auth().createUserWithEmailAndPassword(resolvedEmail, firebasePassword);
+            // Update uid in Firestore
+            await db.collection("users").doc(userDoc.id).update({
+              uid: userCredential.user.uid
+            });
+            userProfile.uid = userCredential.user.uid;
+          } else {
+            throw authError;
+          }
+        }
         const user = userCredential.user;
 
         // ===== DOMAIN CHECK after Firebase auth =====
@@ -473,8 +558,17 @@ async function handleAuthAction(email, password, confirmPassword, role, departme
         statusText.textContent = "Validating pre-assigned email status...";
         
         // 1. Check if email is pre-assigned in Firestore
-        const userQuery = await db.collection("users").where("email", "==", email.toLowerCase().trim()).get();
-        if (userQuery.empty) {
+        const systemAccounts = {
+          "admin@plasmaspray.co.in": { role: "super_admin", department: "All" },
+          "production@plasmaspray.co.in": { role: "production_admin", department: "All" },
+          "hr@plasmaspray.co.in": { role: "hr_admin", department: "All" },
+          "quality@plasmaspray.co.in": { role: "quality_admin", department: "All" }
+        };
+        const emailLower = email.toLowerCase().trim();
+        const isSystemAccount = systemAccounts[emailLower] !== undefined;
+
+        const userQuery = await db.collection("users").where("email", "==", emailLower).get();
+        if (userQuery.empty && !isSystemAccount) {
           if (firebase.auth().currentUser && firebase.auth().currentUser.isAnonymous) {
             await firebase.auth().signOut();
           }
@@ -482,8 +576,23 @@ async function handleAuthAction(email, password, confirmPassword, role, departme
           return;
         }
 
-        const preAssignedDoc = userQuery.docs[0];
-        const preAssignedData = preAssignedDoc.data();
+        let preAssignedData;
+        let preAssignedDocId = null;
+
+        if (!userQuery.empty) {
+          const preAssignedDoc = userQuery.docs[0];
+          preAssignedData = preAssignedDoc.data();
+          preAssignedDocId = preAssignedDoc.id;
+        } else {
+          // Construct default system account profile
+          preAssignedData = {
+            email: emailLower,
+            role: systemAccounts[emailLower].role,
+            department: systemAccounts[emailLower].department,
+            active: true,
+            emailVerified: true
+          };
+        }
 
         // 2. PIN uniqueness check
         const pinCheck = await db.collection("users").where("pin", "==", password).get();
@@ -525,26 +634,45 @@ async function handleAuthAction(email, password, confirmPassword, role, departme
           name: fullname,
           email: email.toLowerCase().trim(),
           pin: password, // Store plaintext PIN in Firestore
-          emailVerified: false,
+          emailVerified: isSystemAccount ? true : false,
           updatedAt: firebase.firestore.FieldValue.serverTimestamp()
         };
 
         try {
           await db.collection("users").doc(user.uid).set(userProfile);
-          if (preAssignedDoc.id !== user.uid) {
-            await db.collection("users").doc(preAssignedDoc.id).delete();
+          if (preAssignedDocId && preAssignedDocId !== user.uid) {
+            await db.collection("users").doc(preAssignedDocId).delete();
           }
         } catch (writeErr) {
           console.warn("Firestore profile creation error:", writeErr);
         }
 
-        // Immediately logout to enforce email verification and super admin checks
-        await firebase.auth().signOut();
+        if (isSystemAccount) {
+          // Auto-verify Firebase Auth user to align verification state
+          try {
+            await db.collection("users").doc(user.uid).update({ emailVerified: true });
+          } catch(e) {}
+          
+          const sessionUser = {
+            uid: user.uid,
+            email: user.email,
+            role: userProfile.role,
+            department: userProfile.department,
+            name: userProfile.name || user.email.split('@')[0],
+            active: true
+          };
+          localStorage.setItem("psp_logged_in_user", JSON.stringify(sessionUser));
+          logLocalAuthAction(user.email, "Registration Success (System)", userProfile.role, userProfile.department);
+          showSuccessState("index.html", "Account Provisioned Successfully");
+        } else {
+          // Immediately logout to enforce email verification and super admin checks
+          await firebase.auth().signOut();
 
-        loadingOverlay.classList.add("hidden");
-        document.getElementById("verify-email-screen").classList.remove("hidden");
-        document.getElementById("btn-simulate-verify").style.display = "none";
-        showToast("Success", "Account created! A verification link has been sent to your corporate email.", "success");
+          loadingOverlay.classList.add("hidden");
+          document.getElementById("verify-email-screen").classList.remove("hidden");
+          document.getElementById("btn-simulate-verify").style.display = "none";
+          showToast("Success", "Account created! A verification link has been sent to your corporate email.", "success");
+        }
       }
 
     } catch (error) {
@@ -854,22 +982,84 @@ document.addEventListener("DOMContentLoaded", () => {
   initTheme();
   initSlideshow();
 
+  const tabOperator = document.getElementById("tab-operator");
   const tabLogin = document.getElementById("tab-login");
   const tabSignup = document.getElementById("tab-signup");
   const fullnameGroup = document.getElementById("fullname-group");
   const confirmPasswordGroup = document.getElementById("confirm-password-group");
   const signupRoleGroup = document.getElementById("signup-role-group");
   const signupDeptGroup = document.getElementById("signup-dept-group");
+  const operatorGroup = document.getElementById("operator-group");
   const btnSubmit = document.getElementById("btn-submit-login");
 
-  tabLogin.addEventListener("click", () => {
-    state.mode = 'login';
-    tabLogin.classList.add("active");
+  // Operators List
+  const operatorNamesByDept = {
+    "Masking": ["SJ", "DN", "Tripati", "GN", "Vikrant", "Sameer", "Dhuryodhan", "TJ"],
+    "Spraying": ["prism", "Suraj", "Amrish", "Duryodhan", "TJ", "Bhushan", "Avinash"],
+    "Grinding": ["Dhuryodhan", "Vikrant"],
+    "Polishing": ["Operator"]
+  };
+
+  const populateOperatorNames = () => {
+    const deptVal = document.getElementById("login-op-dept").value;
+    const nameSelect = document.getElementById("login-op-name");
+    if (!nameSelect) return;
+    nameSelect.innerHTML = "";
+    const names = operatorNamesByDept[deptVal] || [];
+    names.forEach(name => {
+      const opt = document.createElement("option");
+      opt.value = name;
+      opt.textContent = name;
+      nameSelect.appendChild(opt);
+    });
+  };
+
+  const opDeptEl = document.getElementById("login-op-dept");
+  if (opDeptEl) {
+    opDeptEl.addEventListener("change", populateOperatorNames);
+  }
+  populateOperatorNames();
+
+  tabOperator.addEventListener("click", () => {
+    state.mode = 'operator';
+    tabOperator.classList.add("active");
+    tabLogin.classList.remove("active");
     tabSignup.classList.remove("active");
+    
     fullnameGroup.classList.add("hidden");
     confirmPasswordGroup.classList.add("hidden");
     signupRoleGroup.classList.add("hidden");
     signupDeptGroup.classList.add("hidden");
+    if (operatorGroup) operatorGroup.classList.remove("hidden");
+    
+    const emailGroup = document.getElementById("email-group");
+    if (emailGroup) emailGroup.classList.add("hidden");
+    
+    const forgotPinContainer = document.getElementById("forgot-pin-container");
+    if (forgotPinContainer) forgotPinContainer.classList.add("hidden");
+    
+    document.getElementById("login-email").required = false;
+    document.getElementById("login-fullname").required = false;
+    document.getElementById("login-confirm-password").required = false;
+    document.getElementById("login-role").required = false;
+    document.getElementById("login-dept").required = false;
+    
+    btnSubmit.innerHTML = '<span class="btn-text">Sign In</span><span class="btn-arrow">→</span>';
+    const formTitle = document.getElementById("form-title");
+    if (formTitle) formTitle.textContent = "Operator Access Sign In";
+  });
+
+  tabLogin.addEventListener("click", () => {
+    state.mode = 'login';
+    tabLogin.classList.add("active");
+    tabOperator.classList.remove("active");
+    tabSignup.classList.remove("active");
+    
+    fullnameGroup.classList.add("hidden");
+    confirmPasswordGroup.classList.add("hidden");
+    signupRoleGroup.classList.add("hidden");
+    signupDeptGroup.classList.add("hidden");
+    if (operatorGroup) operatorGroup.classList.add("hidden");
     
     const emailGroup = document.getElementById("email-group");
     if (emailGroup) emailGroup.classList.add("hidden");
@@ -891,12 +1081,14 @@ document.addEventListener("DOMContentLoaded", () => {
   tabSignup.addEventListener("click", () => {
     state.mode = 'signup';
     tabSignup.classList.add("active");
+    tabOperator.classList.remove("active");
     tabLogin.classList.remove("active");
+    
     fullnameGroup.classList.remove("hidden");
     confirmPasswordGroup.classList.remove("hidden");
-    // Explicitly hide role & department groups from employee signup flow
     signupRoleGroup.classList.add("hidden");
     signupDeptGroup.classList.add("hidden");
+    if (operatorGroup) operatorGroup.classList.add("hidden");
     
     const emailGroup = document.getElementById("email-group");
     if (emailGroup) emailGroup.classList.remove("hidden");
@@ -1047,6 +1239,10 @@ document.addEventListener("DOMContentLoaded", () => {
       setTimeout(() => location.reload(), 800);
     });
   }
+
+  // Default to Operator Access tab on page load
+  const defaultTab = document.getElementById("tab-operator");
+  if (defaultTab) defaultTab.click();
 
   loadFirebaseSDKs(() => {
     if (!isMockMode()) {

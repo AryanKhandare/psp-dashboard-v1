@@ -81,14 +81,18 @@
 
       <div class="login-card" id="login-card">
         <!-- Auth Tabs -->
-        <div class="auth-tabs">
-          <button type="button" class="auth-tab active" id="tab-login">
-            <span class="tab-icon">🔐</span>
-            Sign In
+        <div class="auth-tabs" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 2px; padding: 2px;">
+          <button type="button" class="auth-tab active" id="tab-operator" style="font-size: 12.5px; padding: 10px 2px; gap: 4px;">
+            <span class="tab-icon">👷</span>
+            Operator
           </button>
-          <button type="button" class="auth-tab" id="tab-signup">
+          <button type="button" class="auth-tab" id="tab-login" style="font-size: 12.5px; padding: 10px 2px; gap: 4px;">
+            <span class="tab-icon">🔐</span>
+            Admin/Staff
+          </button>
+          <button type="button" class="auth-tab" id="tab-signup" style="font-size: 12.5px; padding: 10px 2px; gap: 4px;">
             <span class="tab-icon">👤</span>
-            Create Account
+            Register
           </button>
         </div>
 
@@ -120,6 +124,28 @@
               <span class="input-check">✓</span>
             </div>
           </div>
+          <!-- Operator Department & Name Group -->
+          <div class="form-group" id="operator-group">
+            <label class="form-label" for="login-op-dept">Department</label>
+            <div class="input-wrapper select-wrapper" style="margin-bottom: 12px;">
+              <span class="input-icon">🔧</span>
+              <select class="form-input" id="login-op-dept">
+                <option value="Masking">Masking</option>
+                <option value="Spraying">Spraying</option>
+                <option value="Grinding">Grinding</option>
+                <option value="Polishing">Polishing</option>
+              </select>
+            </div>
+            
+            <label class="form-label" for="login-op-name">Select Operator Name</label>
+            <div class="input-wrapper select-wrapper">
+              <span class="input-icon">👤</span>
+              <select class="form-input" id="login-op-name">
+                <!-- Populated dynamically via JS -->
+              </select>
+            </div>
+          </div>
+
           <div class="form-group" id="password-group">
             <label class="form-label" for="login-password">Security PIN</label>
             <div class="input-wrapper">

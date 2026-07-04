@@ -215,9 +215,23 @@ function calculateSpeedScore(weekJobs, department) {
  * Pillar 2: Queue Response Score (0-20)
  * Measures how fast operator picks up waiting jobs
  */
-function calculateQueueScore(weekJobs, department) {
+function calculateQueueScore(weekJobs, department, operatorEmail) {
   const started = weekJobs.started;
-  if (started.length === 0) return { score: 20, avgPickupMinutes: 0, longestWaitMinutes: 0, avoidableDelays: 0 };
+  
+  // Find late start penalties from target user document in users collection
+  const allUsers = (typeof users !== 'undefined' && Array.isArray(users)) ? users : [];
+  let penalties = 0;
+  if (operatorEmail) {
+    const targetUser = allUsers.find(u => u.email && u.email.toLowerCase() === operatorEmail.toLowerCase());
+    if (targetUser && targetUser.lateStartPenalties) {
+      penalties = Number(targetUser.lateStartPenalties) || 0;
+    }
+  }
+
+  if (started.length === 0) {
+    const finalScore = Math.max(0, 20 - (penalties * 5));
+    return { score: finalScore, avgPickupMinutes: 0, longestWaitMinutes: 0, avoidableDelays: penalties };
+  }
 
   const stageKey = STAGE_KEY_MAP[department] || department.toLowerCase();
   const pickupTimes = [];
@@ -240,20 +254,23 @@ function calculateQueueScore(weekJobs, department) {
     }
   });
 
-  if (pickupTimes.length === 0) return { score: 20, avgPickupMinutes: 0, longestWaitMinutes: 0, avoidableDelays: 0 };
+  if (pickupTimes.length === 0) {
+    const finalScore = Math.max(0, 20 - (penalties * 5));
+    return { score: finalScore, avgPickupMinutes: 0, longestWaitMinutes: 0, avoidableDelays: penalties };
+  }
 
   const avgPickup = pickupTimes.reduce((a, b) => a + b, 0) / pickupTimes.length;
   const longestWait = Math.max(...pickupTimes);
 
   // Score: full points if avg pickup < 5 min, deduct for delays
   const totalAvoidableMinutes = pickupTimes.filter(t => t > 10).reduce((a, b) => a + b, 0);
-  const score = Math.max(0, Math.min(20, 20 - Math.floor(totalAvoidableMinutes / 10)));
+  const score = Math.max(0, Math.min(20, 20 - Math.floor(totalAvoidableMinutes / 10) - (penalties * 5)));
 
   return {
     score,
     avgPickupMinutes: Math.round(avgPickup),
     longestWaitMinutes: Math.round(longestWait),
-    avoidableDelays
+    avoidableDelays: avoidableDelays + penalties
   };
 }
 
@@ -507,7 +524,7 @@ function generateLeaderboard(allJobs, allOperators, department, weekRange) {
     const dept = op.department || department;
     const weekJobs = collectWeeklyJobData(allJobs, op.email, dept, weekRange);
     const speedScore = calculateSpeedScore(weekJobs, dept);
-    const queueScore = calculateQueueScore(weekJobs, dept);
+    const queueScore = calculateQueueScore(weekJobs, dept, op.email);
     const idleScore = calculateIdleScore(op.email, dept, weekRange);
     const throughputScore = calculateThroughputScore(weekJobs);
     const qualityScore = calculateQualityScore(weekJobs);
@@ -572,7 +589,7 @@ function generateWeeklyReport(allJobs, operatorEmail, department, allOperators, 
 
   // Calculate all 5 pillar scores
   const speedScore = calculateSpeedScore(weekJobs, department);
-  const queueScore = calculateQueueScore(weekJobs, department);
+  const queueScore = calculateQueueScore(weekJobs, department, operatorEmail);
   const idleScore = calculateIdleScore(operatorEmail, department, weekRange);
   const throughputScore = calculateThroughputScore(weekJobs);
   const qualityScore = calculateQualityScore(weekJobs);
@@ -941,6 +958,13 @@ function initReportsTab() {
         window.print();
       });
     }
+    const exportExcelBtn = document.getElementById('btn-export-excel');
+    if (exportExcelBtn) {
+      exportExcelBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        exportAllJobsToExcel();
+      });
+    }
     if (opSelect) {
       opSelect.addEventListener('change', () => {
         triggerReportGeneration();
@@ -1009,4 +1033,160 @@ function triggerReportGeneration() {
       showToast("Error", `Failed to generate report: ${err.message || err}`, "danger");
     }
   }
+}
+
+function exportAllJobsToExcel() {
+  if (typeof jobs === "undefined" || !Array.isArray(jobs) || jobs.length === 0) {
+    alert("No job data available to export.");
+    return;
+  }
+
+  let html = `
+    <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+    <head>
+      <!--[if gte mso 9]>
+      <xml>
+        <x:ExcelWorkbook>
+          <x:ExcelWorksheets>
+            <x:ExcelWorksheet>
+              <x:Name>All Stage Jobs Report</x:Name>
+              <x:WorksheetOptions>
+                <x:DisplayGridlines/>
+              </x:WorksheetOptions>
+            </x:ExcelWorksheet>
+          </x:ExcelWorksheets>
+        </x:ExcelWorkbook>
+      </xml>
+      <![endif]-->
+      <style>
+        table { border-collapse: collapse; font-family: Arial, sans-serif; font-size: 10pt; }
+        th { background-color: #10b981; color: white; font-weight: bold; border: 1px solid #cccccc; padding: 8px; text-align: left; }
+        td { border: 1px solid #dddddd; padding: 6px; text-align: left; mso-number-format:"\\@"; }
+        .num { mso-number-format:"#,##0"; text-align: right; }
+        .title { font-size: 16pt; font-weight: bold; color: #0f766e; text-align: center; height: 40px; }
+      </style>
+    </head>
+    <body>
+      <table>
+        <tr>
+          <td colspan="34" class="title" style="text-align: center; font-size: 16pt; font-weight: bold;">Plasma Spray Processors - Master Workflow Job Report</td>
+        </tr>
+        <tr>
+          <th>KP No.</th>
+          <th>JC No.</th>
+          <th>Customer</th>
+          <th>Part Name</th>
+          <th>Total Qty</th>
+          <th>Process Type</th>
+          <th>Priority</th>
+          <th>Current Stage</th>
+          <th>Global Status</th>
+          
+          <th>Inspection Status</th>
+          <th>Inspection Operator</th>
+          <th>Inspection Date</th>
+          
+          <th>Masking Status</th>
+          <th>Masking Operator</th>
+          <th>Masking Start</th>
+          <th>Masking End</th>
+          <th>Masking Dur (Hrs)</th>
+          
+          <th>Spraying Status</th>
+          <th>Spraying Operator</th>
+          <th>Spraying Start</th>
+          <th>Spraying End</th>
+          <th>Spraying Dur (Hrs)</th>
+          
+          <th>Grinding Status</th>
+          <th>Grinding Operator</th>
+          <th>Grinding Start</th>
+          <th>Grinding End</th>
+          <th>Grinding Dur (Hrs)</th>
+          
+          <th>Polishing Status</th>
+          <th>Polishing Operator</th>
+          
+          <th>Final Insp Status</th>
+          <th>Final Insp Operator</th>
+          
+          <th>Dispatch Status</th>
+          <th>Dispatch Date</th>
+        </tr>
+  `;
+
+  jobs.forEach(j => {
+    const formatTime = (isoStr) => {
+      if (!isoStr) return "";
+      try {
+        const d = new Date(isoStr);
+        return d.toLocaleString();
+      } catch(e) { return isoStr; }
+    };
+    const formatDur = (ms) => {
+      if (!ms || isNaN(ms)) return "0.00";
+      return (Number(ms) / (1000 * 60 * 60)).toFixed(2);
+    };
+
+    html += `
+      <tr>
+        <td>${j.kpNumber || ""}</td>
+        <td>${j.jcNo || ""}</td>
+        <td>${j.customer || ""}</td>
+        <td>${j.partName || ""}</td>
+        <td class="num">${j.quantity || 1}</td>
+        <td>${j.processType || ""}</td>
+        <td>${j.priority || ""}</td>
+        <td>${j.currentDepartment || ""}</td>
+        <td>${j.status || ""}</td>
+        
+        <td>${j.inspection?.status || "Pending"}</td>
+        <td>${j.inspection?.operatorName || ""}</td>
+        <td>${j.inspectionDate || ""}</td>
+        
+        <td>${j.masking?.status || "Pending"}</td>
+        <td>${j.masking?.operatorName || ""}</td>
+        <td>${formatTime(j.masking?.startTime)}</td>
+        <td>${formatTime(j.masking?.endTime)}</td>
+        <td class="num">${formatDur(j.masking?.durationMs)}</td>
+        
+        <td>${j.spraying?.status || "Pending"}</td>
+        <td>${j.spraying?.operatorName || ""}</td>
+        <td>${formatTime(j.spraying?.startTime)}</td>
+        <td>${formatTime(j.spraying?.endTime)}</td>
+        <td class="num">${formatDur(j.spraying?.durationMs)}</td>
+        
+        <td>${j.grinding?.status || "Pending"}</td>
+        <td>${j.grinding?.operatorName || ""}</td>
+        <td>${formatTime(j.grinding?.startTime)}</td>
+        <td>${formatTime(j.grinding?.endTime)}</td>
+        <td class="num">${formatDur(j.grinding?.durationMs)}</td>
+        
+        <td>${j.polishing?.status || "Pending"}</td>
+        <td>${j.polishing?.operatorName || ""}</td>
+        
+        <td>${j.finalInspection?.status || "Pending"}</td>
+        <td>${j.finalInspection?.operatorName || ""}</td>
+        
+        <td>${j.dispatch?.status || "Pending"}</td>
+        <td>${j.dispatch?.dispatchDate || j.dispatch?.date || ""}</td>
+      </tr>
+    `;
+  });
+
+  html += `
+      </table>
+    </body>
+    </html>
+  `;
+
+  const blob = new Blob([html], { type: "application/vnd.ms-excel" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `PSP_Master_Workflow_Jobs_${new Date().toISOString().split('T')[0]}.xls`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
