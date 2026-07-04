@@ -594,6 +594,13 @@ function buildCardArrivalTimerHTML(job) {
   `;
 }
 
+function buildDeleteJobButtonHTML(kpNumber) {
+  if (!currentUser) return "";
+  const isAdmin = ["super_admin", "production_admin", "it_team"].includes(currentUser.role);
+  if (!isAdmin) return "";
+  return `<button class="btn btn-danger btn-xs" style="width:100%; height:28px; font-size:11px; margin-top:4px; opacity:0.85;" onclick="event.stopPropagation(); deleteJob('${kpNumber}')">🗑️ Delete Job</button>`;
+}
+
 function updateCardCountdownTimers() {
   const elements = document.querySelectorAll(".tat-countdown-container");
   elements.forEach(el => {
@@ -4345,6 +4352,7 @@ function renderInspectionDashboard() {
           ? `<button class="btn btn-success btn-xs" style="width:100%;height:28px;font-size:10px;font-weight:700;" onclick="event.stopPropagation();triggerInspectionFloatingTransition('${job.kpNumber}')">🚀 Approve &amp; Push Job</button>`
           : `<button class="btn btn-secondary btn-xs" style="width:100%;height:28px;font-size:10px;" onclick="event.stopPropagation();moveInspectionSubStatus('${job.kpNumber}')">→ Move to Next Stage</button>`
         }
+        ${buildDeleteJobButtonHTML(job.kpNumber)}
       </div>
     `;
 
@@ -4697,6 +4705,7 @@ function renderLiveJobQueue() {
       </div>
       <div class="stage-card-actions" style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 10px; display: flex; flex-direction: column; gap: 8px;">
         ${actionButton}
+        ${buildDeleteJobButtonHTML(job.kpNumber)}
       </div>
     `;
     cardsContainer.appendChild(card);
@@ -5739,6 +5748,7 @@ function renderSprayingLiveQueue() {
       </div>
       <div class="stage-card-actions" style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 10px; display: flex; flex-direction: column; gap: 8px;">
         ${actionButton}
+        ${buildDeleteJobButtonHTML(job.kpNumber)}
       </div>
     `;
     container.appendChild(card);
@@ -7330,6 +7340,7 @@ function renderGrindingLiveQueue() {
       </div>
       <div class="stage-card-actions" style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 10px; display: flex; flex-direction: column; gap: 8px;">
         ${actionButton}
+        ${buildDeleteJobButtonHTML(job.kpNumber)}
       </div>
     `;
     cardsContainer.appendChild(card);
@@ -7918,6 +7929,7 @@ function renderPolishingDashboard() {
       </div>
       <div class="stage-card-actions" style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 10px; display: flex; flex-direction: column; gap: 8px;">
         <button class="btn btn-success btn-xs" style="width:100%; height:32px; ${isReadOnly ? 'display:none;' : ''}" onclick="triggerPolishingFloatingTransition('${job.kpNumber}')">Complete & Push Job</button>
+        ${buildDeleteJobButtonHTML(job.kpNumber)}
       </div>
     `;
     container.appendChild(card);
@@ -8048,6 +8060,7 @@ function renderFinalInspectionDashboard() {
       </div>
       <div class="stage-card-actions" style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 10px; display: flex; flex-direction: column; gap: 8px;">
         <button class="btn btn-success btn-xs" style="width:100%; height:32px; ${isReadOnly ? 'display:none;' : ''}" onclick="triggerFinalInspectionFloatingTransition('${job.kpNumber}')">Approve QA & Close</button>
+        ${buildDeleteJobButtonHTML(job.kpNumber)}
       </div>
     `;
     container.appendChild(card);
@@ -8153,36 +8166,27 @@ function renderDispatchDashboard() {
       </div>
       <div class="stage-card-actions" style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 10px; display: flex; flex-direction: column; gap: 8px;">
         <button class="btn btn-success btn-xs" style="width:100%; height:32px; ${isReadOnly ? 'display:none;' : ''}" onclick="triggerDispatchFloatingTransition('${job.kpNumber}')">Dispatch & Close</button>
+        ${buildDeleteJobButtonHTML(job.kpNumber)}
       </div>
     `;
     container.appendChild(card);
   });
 }
 
-// User Management Renderer (Super Admin only)
-async function renderUserManagement() {
+function renderUserManagement() {
   const tbody = document.getElementById("user-management-table-body");
   if (!tbody) return;
   
-  const isMock = !firebaseConfig.apiKey || firebaseConfig.apiKey.includes("YOUR_FIREBASE_") || localStorage.getItem("psp_auth_mock") === "true";
-  let users = [];
+  const isMock = isMockMode();
+  let list = [];
   
-  if (!isMock && typeof firebase !== 'undefined' && firebase.firestore) {
-    try {
-      const db = firebase.firestore();
-      const snapshot = await db.collection("users").get();
-      snapshot.forEach(doc => {
-        users.push(doc.data());
-      });
-    } catch (err) {
-      console.warn("Could not fetch Firestore users, using Mock DB backup:", err);
-      users = MOCK_DB.getUsers();
-    }
+  if (!isMock && typeof users !== 'undefined' && Array.isArray(users) && users.length > 0) {
+    list = users;
   } else {
-    users = MOCK_DB.getUsers();
+    list = MOCK_DB.getUsers();
   }
 
-  renderUserRows(users);
+  renderUserRows(list);
 }
 
 function renderUserRows(users) {
@@ -8402,6 +8406,60 @@ async function deleteUser(uid) {
       renderAll();
     }
   }
+}
+
+async function deleteJob(kpNumber) {
+  const job = jobs.find(j => j.kpNumber === kpNumber);
+  if (!job) {
+    alert("Job not found.");
+    return;
+  }
+
+  if (!confirm(`⚠️ Are you sure you want to permanently delete job ${kpNumber}?\n\nStage: ${job.currentDepartment}\nPart: ${job.partName}\nCustomer: ${job.customer}\n\nThis action cannot be undone.`)) {
+    return;
+  }
+
+  // Remove from local jobs array
+  const idx = jobs.findIndex(j => j.kpNumber === kpNumber);
+  if (idx !== -1) {
+    jobs.splice(idx, 1);
+  }
+
+  // Sync to Firestore
+  if (!isMockMode() && job.id) {
+    try {
+      const db = firebase.firestore();
+      await db.collection("jobs").doc(job.id).delete();
+      console.log(`[Delete] Firestore job ${kpNumber} (doc: ${job.id}) deleted.`);
+    } catch (err) {
+      console.error("Firestore job deletion error:", err);
+    }
+  }
+
+  // Sync to backend (Apps Script)
+  try {
+    const payload = {
+      type: "DELETE_JOB",
+      kpNo: kpNumber,
+      stage: job.currentDepartment
+    };
+    await sendBackendPost(payload);
+  } catch (err) {
+    console.warn("Backend delete sync skipped:", err);
+  }
+
+  // Save mock state
+  if (isMockMode()) {
+    saveState();
+  }
+
+  createAuditLog(currentUser.email, kpNumber, `Deleted job ${kpNumber} from ${job.currentDepartment} stage`);
+  
+  if (typeof showToast === 'function') {
+    showToast("Job Deleted", `Job ${kpNumber} has been permanently removed from the system.`, "danger");
+  }
+  
+  renderAll();
 }
 
 function showToast(title, message, type = 'info') {
@@ -8820,6 +8878,9 @@ function setupEventListeners() {
         return;
       }
       
+      const isMock = isMockMode();
+      const newUid = isMock ? "uid-" + Math.random().toString(36).substr(2, 9) : firebase.firestore().collection("users").doc().id;
+
       const newUser = {
         uid: newUid,
         email,
@@ -8831,16 +8892,17 @@ function setupEventListeners() {
       
       MOCK_DB.addUser(newUser, password);
       
-      const isMock = !firebaseConfig.apiKey || firebaseConfig.apiKey.includes("YOUR_FIREBASE_") || localStorage.getItem("psp_auth_mock") === "true";
       if (!isMock) {
         try {
           const db = firebase.firestore();
           await db.collection("users").doc(newUid).set({
             uid: newUid,
+            name: email.split('@')[0],
             email,
             role,
             department: newUser.department,
             active: true,
+            emailVerified: true,
             pin: password,
             createdAt: new Date().toISOString()
           });
