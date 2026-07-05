@@ -1388,6 +1388,11 @@ function updateInspectionDropdowns() {
 }
 
 async function loadInspectionKPs(forceRefresh = false, isAutoRefresh = false) {
+  if (isMockMode()) {
+    console.log("[Inspection] Skipped Google Sheets fetch in Mock Mode.");
+    return;
+  }
+
   // ─── Request Lock: Skip if another fetch is already running ───
   if (_inspectionFetchInProgress) {
     console.log("[Inspection] Fetch already in progress — ignoring concurrent request.");
@@ -1538,11 +1543,13 @@ function shouldBypassMasking(partName) {
 }
 
 async function autoSyncJobsFromSpreadsheet(records) {
+  if (isMockMode()) return;
   if (!isMockMode() && !_initialFirestoreLoadComplete) {
     console.log("[Auto-Sync] Skipping auto-sync on startup because initial Firestore snapshot is not yet loaded.");
     return;
   }
   window.autoImportedKPs = window.autoImportedKPs || new Set();
+  window.deletedJobs = window.deletedJobs || new Set();
   let anyChange = false;
   
   // Build a Map of existing jobs by kpNumber for fast O(1) lookups
@@ -1558,6 +1565,11 @@ async function autoSyncJobsFromSpreadsheet(records) {
   for (const record of records) {
     const kpNo = record.kpNo;
     if (!kpNo) continue;
+    
+    // Skip if job is explicitly deleted
+    if (window.deletedJobs.has(kpNo.toLowerCase())) {
+      continue;
+    }
     
     // Determine target stage:
     // If Column Y (Status) is NOT "done", target department is "Inspection".
@@ -1642,15 +1654,14 @@ async function autoSyncJobsFromSpreadsheet(records) {
         }
       }
 
-      // Sync only if job is currently in either Inspection or Masking stage, or target stage is Final Inspection or Spraying
-      if (existingJob.currentDepartment === "Inspection" || existingJob.currentDepartment === "Masking" || targetDept === "Final Inspection" || targetDept === "Spraying") {
-        if (existingJob.currentDepartment !== targetDept) {
-          if (window.autoImportedKPs.has(kpNo.toLowerCase())) {
-            continue;
-          }
-          window.autoImportedKPs.add(kpNo.toLowerCase());
-          
-          console.log(`[Auto-Sync] Job ${kpNo} is in ${existingJob.currentDepartment} but spreadsheet indicates it should be in ${targetDept}. Syncing stage...`);
+      // Sync stage ONLY if the job is still at the initial Inspection stage
+      if (existingJob.currentDepartment === "Inspection" && existingJob.currentDepartment !== targetDept) {
+        if (window.autoImportedKPs.has(kpNo.toLowerCase())) {
+          continue;
+        }
+        window.autoImportedKPs.add(kpNo.toLowerCase());
+        
+        console.log(`[Auto-Sync] Job ${kpNo} stage sync: local=${existingJob.currentDepartment}, sheet=${targetDept}. Syncing stage...`);
           
           const oldDept = existingJob.currentDepartment;
           const oldStatus = existingJob.status;
@@ -1701,8 +1712,7 @@ async function autoSyncJobsFromSpreadsheet(records) {
             window.autoImportedKPs.delete(kpNo.toLowerCase());
           }
         }
-      }
-    } else {
+      } else {
       // Job does not exist in local queue. Import it into target stage.
       if (window.autoImportedKPs.has(kpNo.toLowerCase())) {
         continue;
@@ -1831,12 +1841,15 @@ const MOCK_DB = {
   saveUsers(users) {
     localStorage.setItem('mock_db_users', JSON.stringify(users));
   },
+  getPasswords() {
+    return JSON.parse(localStorage.getItem('mock_db_passwords') || '{}');
+  },
   addUser(user, password) {
     const users = this.getUsers();
     users.push(user);
     this.saveUsers(users);
     
-    const passwords = JSON.parse(localStorage.getItem('mock_db_passwords') || '{}');
+    const passwords = this.getPasswords();
     passwords[user.email] = password;
     localStorage.setItem('mock_db_passwords', JSON.stringify(passwords));
   }
@@ -2022,6 +2035,13 @@ function loadCachedData() {
   try {
     const cachedJobs = localStorage.getItem("psp_cached_jobs");
     if (cachedJobs) jobs = JSON.parse(cachedJobs);
+    
+    const cachedDeleted = localStorage.getItem("psp_deleted_jobs");
+    if (cachedDeleted) {
+      window.deletedJobs = new Set(JSON.parse(cachedDeleted));
+    } else {
+      window.deletedJobs = new Set();
+    }
     
     const cachedUsers = localStorage.getItem("psp_cached_users");
     if (cachedUsers) users = JSON.parse(cachedUsers);
@@ -2886,8 +2906,18 @@ function startFirestoreListeners() {
     // 1. Listen to jobs
     const unsubJobs = db.collection("jobs").onSnapshot(snapshot => {
       let tempJobs = [];
+      window.deletedJobs = window.deletedJobs || new Set();
+      window.deletedJobs.clear();
+      
       snapshot.forEach(doc => {
         const data = doc.data();
+        if (data.isDeleted === true) {
+          if (data.kpNumber) {
+            window.deletedJobs.add(data.kpNumber.toLowerCase());
+          }
+          return;
+        }
+        
         const job = {
           id: doc.id,
           jobId: data.jobId || doc.id,
@@ -2925,6 +2955,7 @@ function startFirestoreListeners() {
       jobs = tempJobs;
       try {
         localStorage.setItem("psp_cached_jobs", JSON.stringify(tempJobs));
+        localStorage.setItem("psp_deleted_jobs", JSON.stringify(Array.from(window.deletedJobs)));
       } catch (e) {}
       _initialFirestoreLoadComplete = true;
       if (typeof autoAssignPendingJobs === "function") {
@@ -3082,6 +3113,21 @@ function startFirestoreListeners() {
     });
     firestoreListeners.push(unsubNotifications);
     
+    // 10. Listen to deleted jobs
+    const unsubDeleted = db.collection("deleted_jobs").onSnapshot(snapshot => {
+      window.deletedJobs = window.deletedJobs || new Set();
+      window.deletedJobs.clear();
+      snapshot.forEach(doc => {
+        window.deletedJobs.add(doc.id.toLowerCase());
+      });
+      try {
+        localStorage.setItem("psp_deleted_jobs", JSON.stringify(Array.from(window.deletedJobs)));
+      } catch (e) {}
+    }, err => {
+      console.warn("Deleted jobs listener error:", err);
+    });
+    firestoreListeners.push(unsubDeleted);
+    
   } catch (err) {
     console.error("Error initializing Firestore listeners:", err);
   }
@@ -3194,6 +3240,34 @@ async function loadState() {
   if (!isMockMode()) {
     return;
   }
+  
+  // If we have cached jobs in localStorage, load them and skip the network fetch in Mock Mode
+  const cachedJobsStr = localStorage.getItem("psp_cached_jobs");
+  if (cachedJobsStr) {
+    try {
+      const cachedJobs = JSON.parse(cachedJobsStr);
+      if (Array.isArray(cachedJobs) && cachedJobs.length > 0) {
+        jobs = cachedJobs;
+        console.log("[loadState] Restored jobs from local storage cache in Mock/Offline Mode.");
+        
+        const cachedUsers = localStorage.getItem("psp_cached_users");
+        if (cachedUsers) users = JSON.parse(cachedUsers);
+        const cachedOperators = localStorage.getItem("psp_cached_operators");
+        if (cachedOperators) operators = JSON.parse(cachedOperators);
+        const cachedMaterials = localStorage.getItem("psp_cached_materials");
+        if (cachedMaterials) materials = JSON.parse(cachedMaterials);
+        const cachedAudit = localStorage.getItem("psp_cached_audit_logs");
+        if (cachedAudit) auditLogs = JSON.parse(cachedAudit);
+        
+        _stateFetchInProgress = false;
+        renderAll();
+        return;
+      }
+    } catch (e) {
+      console.warn("[loadState] Failed to restore jobs from cache, falling back to Sheets:", e);
+    }
+  }
+
   if (_stateFetchInProgress) {
     console.log("[State] Fetch already in progress — ignoring concurrent request.");
     return;
@@ -4366,9 +4440,38 @@ function executeStageTransition(targetStage, reworkReason = null, reworkComments
   if (overlay) overlay.style.display = "none";
 
   window.pendingTransition = null;
+  window.lastTransitionPayload = payload;
+
+  // Persist locally immediately
+  saveState();
   renderAll();
 
-  // Trigger the 10-second undo countdown banner
+  // Commit to Server/Firebase IMMEDIATELY to prevent data loss on refresh
+  if (payload) {
+    (async () => {
+      try {
+        if (!isMockMode() && sendBackendPost) {
+          await sendBackendPost(payload);
+        }
+        let logMsg = `Job routed to next stage: ${payload.nextStage}`;
+        if (payload.reworkReasonCategory) {
+          logMsg = `Job sent back to previous stage: ${payload.nextStage}. Reason Category: ${payload.reworkReasonCategory}. Comments: ${payload.reworkReasonComments || "None"}`;
+        }
+        await createFirestoreAuditLog(
+          payload.operatorName || getLoggedUser().name,
+          payload.stage || "System",
+          payload.kpNo,
+          payload.reworkReasonCategory ? "Rework Pushback" : "Stage Transition",
+          logMsg
+        );
+      } catch (err) {
+        console.error("Failed to sync stage transition:", err);
+        handleFirestoreError("stage-transition-write", err);
+      }
+    })();
+  }
+
+  // Trigger the 10-second undo countdown banner (purely visual now)
   startUndoCountdown(payload);
 }
 
@@ -4395,35 +4498,14 @@ function startUndoCountdown(payload) {
     }
   }, 1000);
 
-  // Commit on timeout
-  window.undoTimerId = setTimeout(async () => {
+  // Commit on timeout (just hides visual banner)
+  window.undoTimerId = setTimeout(() => {
     clearInterval(window.undoIntervalId);
     banner.style.display = "none";
     window.undoTimerId = null;
     window.undoIntervalId = null;
     window.undoActiveState = null;
-
-    // Permanent Save & Server Sync
-    try {
-      if (!isMockMode() && sendBackendPost && payload) {
-        await sendBackendPost(payload);
-      }
-      let logMsg = `Job routed to next stage: ${payload.nextStage}`;
-      if (payload.reworkReasonCategory) {
-        logMsg = `Job sent back to previous stage: ${payload.nextStage}. Reason Category: ${payload.reworkReasonCategory}. Comments: ${payload.reworkReasonComments || "None"}`;
-      }
-      await createFirestoreAuditLog(
-        payload.operatorName || getLoggedUser().name,
-        payload.stage || "System",
-        payload.kpNo,
-        payload.reworkReasonCategory ? "Rework Pushback" : "Stage Transition",
-        logMsg
-      );
-      saveState();
-      renderAll();
-    } catch (err) {
-      console.error("Failed to sync stage transition:", err);
-    }
+    window.lastTransitionPayload = null;
   }, 10000);
 }
 
@@ -4438,9 +4520,67 @@ function triggerUndoLastTransition() {
   if (banner) banner.style.display = "none";
 
   if (window.undoActiveState) {
+    const payload = window.lastTransitionPayload;
     jobs = window.undoActiveState;
     window.undoActiveState = null;
+    window.lastTransitionPayload = null;
+    saveState();
     renderAll();
+    
+    // Rollback Firebase immediately
+    if (!isMockMode() && payload && payload.kpNo) {
+      (async () => {
+        try {
+          const db = firebase.firestore();
+          const snap = await db.collection("jobs").where("kpNumber", "==", payload.kpNo).get();
+          if (!snap.empty) {
+            const jobRef = snap.docs[0].ref;
+            const targetJob = jobs.find(j => j.kpNumber === payload.kpNo);
+            if (targetJob) {
+              const stageKey = payload.stage.toLowerCase().replace(/[^a-z]/g, "");
+              const nextStageKey = (payload.nextStage || "").toLowerCase().replace(/[^a-z]/g, "");
+              
+              const rollbackUpdates = {
+                currentStage: payload.stage,
+                currentStatus: targetJob.status || "Pending",
+                assignedOperator: targetJob.operatorName ? { uid: "", name: targetJob.operatorName } : null,
+                shift: targetJob.shift || "",
+                lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+              };
+              
+              if (stageKey) {
+                rollbackUpdates[stageKey] = {
+                  status: targetJob[stageKey]?.status || "Pending",
+                  operatorName: targetJob[stageKey]?.operatorName || "",
+                  endTime: null,
+                  durationMs: targetJob[stageKey]?.durationMs || 0,
+                  activeTimeMs: targetJob[stageKey]?.activeTimeMs || 0,
+                  holdHistory: targetJob[stageKey]?.holdHistory || []
+                };
+              }
+              if (nextStageKey) {
+                rollbackUpdates[nextStageKey] = {
+                  status: targetJob[nextStageKey]?.status || "Pending"
+                };
+              }
+              
+              await jobRef.update(rollbackUpdates);
+              
+              await createFirestoreAuditLog(
+                payload.operatorName || getLoggedUser().name,
+                payload.stage || "System",
+                payload.kpNo,
+                "Undo Transition",
+                `Operator undid stage transition. Reverted job back to ${payload.stage}`
+              );
+            }
+          }
+        } catch (err) {
+          console.error("Failed to rollback Firestore stage transition:", err);
+        }
+      })();
+    }
+    
     alert("Transition reverted successfully!");
   }
 }
@@ -8578,6 +8718,7 @@ async function toggleUserStatus(uid) {
         await db.collection("users").doc(uid).update({ active: user.active });
       } catch (err) {
         console.error("Firestore user status sync error:", err);
+        handleFirestoreError("user-status-write", err);
       }
     }
     
@@ -8586,32 +8727,41 @@ async function toggleUserStatus(uid) {
 }
 
 async function deleteUser(uid) {
-  const users = MOCK_DB.getUsers();
-  const userIdx = users.findIndex(u => u.uid === uid);
+  const isMock = isMockMode();
+  let userList = isMock ? MOCK_DB.getUsers() : users;
+  const userIdx = userList.findIndex(u => u.uid === uid);
   if (userIdx !== -1) {
-    const user = users[userIdx];
+    const user = userList[userIdx];
     if (confirm(`Are you sure you want to delete access profile for: ${user.email}?`)) {
-      users.splice(userIdx, 1);
-      MOCK_DB.saveUsers(users);
-      
-      // Remove password entry
-      const passwords = MOCK_DB.getPasswords();
-      delete passwords[user.email];
-      localStorage.setItem('mock_db_passwords', JSON.stringify(passwords));
-      
-      createAuditLog(currentUser.email, null, `Deleted access profile for user: ${user.email}`);
-      
-      // If live firebase, delete Firestore doc
-      const isMock = !firebaseConfig.apiKey || firebaseConfig.apiKey.includes("YOUR_FIREBASE_") || localStorage.getItem("psp_auth_mock") === "true";
-      if (!isMock) {
+      if (isMock) {
+        userList.splice(userIdx, 1);
+        MOCK_DB.saveUsers(userList);
+        
+        // Remove password entry
+        const passwords = MOCK_DB.getPasswords();
+        delete passwords[user.email];
+        localStorage.setItem('mock_db_passwords', JSON.stringify(passwords));
+      } else {
+        // Optimistically remove from global users and save to cache first
+        const globalIdx = users.findIndex(u => u.uid === uid);
+        if (globalIdx !== -1) {
+          users.splice(globalIdx, 1);
+          try {
+            localStorage.setItem("psp_cached_users", JSON.stringify(users));
+          } catch (e) {}
+        }
+
+        // In Firebase mode, delete Firestore doc
         try {
           const db = firebase.firestore();
           await db.collection("users").doc(uid).delete();
         } catch (err) {
           console.error("Firestore user deletion sync error:", err);
+          handleFirestoreError("user-delete-write", err);
         }
       }
       
+      createAuditLog(currentUser.email, null, `Deleted access profile for user: ${user.email}`);
       renderAll();
     }
   }
@@ -8634,14 +8784,23 @@ async function deleteJob(kpNumber) {
     jobs.splice(idx, 1);
   }
 
+  // Save state and re-render locally immediately to guarantee persistence
+  saveState();
+  renderAll();
+
   // Sync to Firestore
   if (!isMockMode() && job.id) {
     try {
       const db = firebase.firestore();
-      await db.collection("jobs").doc(job.id).delete();
-      console.log(`[Delete] Firestore job ${kpNumber} (doc: ${job.id}) deleted.`);
+      await db.collection("jobs").doc(job.id).update({
+        isDeleted: true,
+        status: "Deleted",
+        lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      console.log(`[Delete] Firestore job ${kpNumber} (doc: ${job.id}) marked as deleted.`);
     } catch (err) {
       console.error("Firestore job deletion error:", err);
+      handleFirestoreError("job-delete-write", err);
     }
   }
 
@@ -8657,18 +8816,11 @@ async function deleteJob(kpNumber) {
     console.warn("Backend delete sync skipped:", err);
   }
 
-  // Save mock state
-  if (isMockMode()) {
-    saveState();
-  }
-
   createAuditLog(currentUser.email, kpNumber, `Deleted job ${kpNumber} from ${job.currentDepartment} stage`);
   
   if (typeof showToast === 'function') {
     showToast("Job Deleted", `Job ${kpNumber} has been permanently removed from the system.`, "danger");
   }
-  
-  renderAll();
 }
 
 function showToast(title, message, type = 'info') {
@@ -8737,6 +8889,7 @@ window.triggerFinalInspectionFloatingTransition = triggerFinalInspectionFloating
 window.triggerDispatchFloatingTransition = triggerDispatchFloatingTransition;
 window.toggleUserStatus = toggleUserStatus;
 window.deleteUser = deleteUser;
+window.deleteJob = deleteJob;
 window.saveAndApproveUser = saveAndApproveUser;
 
 // 13. DOM EVENTS HOOKS & ATTACHMENTS
@@ -9070,23 +9223,23 @@ function setupEventListeners() {
         return;
       }
       
-      const users = MOCK_DB.getUsers();
+      const isMock = isMockMode();
+      const activeUsers = isMock ? MOCK_DB.getUsers() : users;
       
       // Singleton super admin check
       if (role === 'super_admin') {
-        const hasSuper = users.some(u => u.role === 'super_admin');
+        const hasSuper = activeUsers.some(u => u.role === 'super_admin');
         if (hasSuper) {
           alert("Super Admin account already exists.");
           return;
         }
       }
       
-      if (users.some(u => u.email.toLowerCase() === email.toLowerCase())) {
+      if (activeUsers.some(u => u.email.toLowerCase() === email.toLowerCase())) {
         alert("A user with this email is already registered.");
         return;
       }
       
-      const isMock = isMockMode();
       const newUid = isMock ? "uid-" + Math.random().toString(36).substr(2, 9) : firebase.firestore().collection("users").doc().id;
 
       const newUser = {
@@ -9116,6 +9269,7 @@ function setupEventListeners() {
           });
         } catch (err) {
           console.error("Firestore user creation sync error:", err);
+          handleFirestoreError("user-creation-write", err);
         }
       }
       
