@@ -204,6 +204,7 @@ let selectedShiftName = "A Shift"; // Shift modal selection state
 let selectedHoldReason = null; // Hold Reason touch select state
 let selectedGrindingJobKp = null; // Grinding active job selection state
 let firestoreListeners = []; // Firestore listener unsubscribe handles
+let _initialFirestoreLoadComplete = false; // Flag to prevent auto-sync before Firestore load complete
 
 // Logged In User State
 let currentUser = null;
@@ -400,6 +401,7 @@ function getOperatorsForDepartment(deptName) {
     if (cleanDept === "masking") return ["Sameer", "Tripati", "SJ", "DN", "Vikrant"];
     if (cleanDept === "spraying") return ["GN", "Vikrant", "TJ"];
     if (cleanDept === "grinding") return ["Dhuryodhan", "Vikrant"];
+    if (cleanDept === "polishing") return ["Polishing Operator", "Vikrant"];
     return ["Operator"];
   }
   return deptOps;
@@ -466,21 +468,23 @@ function autoAssignPendingJobs() {
 
         if (isGenericOrInvalid) {
           const assignedOp = getNextRoundRobinOperator(job.currentDepartment);
-          job[stageKey].operatorName = assignedOp;
-          job.stageAssignedAt = job.stageAssignedAt || {};
-          if (!job.stageAssignedAt[stageKey]) {
-            job.stageAssignedAt[stageKey] = new Date().toISOString();
-          }
-          // Sync queueEntryTime for weekly reports
-          job[stageKey].queueEntryTime = job.stageAssignedAt[stageKey];
-          updated = true;
-          if (!isMockMode() && job.id) {
-            const db = firebase.firestore();
-            const updates = {};
-            updates[`${stageKey}.operatorName`] = assignedOp;
-            updates[`stageAssignedAt.${stageKey}`] = job.stageAssignedAt[stageKey];
-            updates[`${stageKey}.queueEntryTime`] = job.stageAssignedAt[stageKey];
-            db.collection("jobs").doc(job.id).update(updates).catch(e => console.error("Firestore auto-assign err:", e));
+          if (assignedOp && assignedOp !== currentOp) {
+            job[stageKey].operatorName = assignedOp;
+            job.stageAssignedAt = job.stageAssignedAt || {};
+            if (!job.stageAssignedAt[stageKey]) {
+              job.stageAssignedAt[stageKey] = new Date().toISOString();
+            }
+            // Sync queueEntryTime for weekly reports
+            job[stageKey].queueEntryTime = job.stageAssignedAt[stageKey];
+            updated = true;
+            if (!isMockMode() && job.id) {
+              const db = firebase.firestore();
+              const updates = {};
+              updates[`${stageKey}.operatorName`] = assignedOp;
+              updates[`stageAssignedAt.${stageKey}`] = job.stageAssignedAt[stageKey];
+              updates[`${stageKey}.queueEntryTime`] = job.stageAssignedAt[stageKey];
+              db.collection("jobs").doc(job.id).update(updates).catch(e => console.error("Firestore auto-assign err:", e));
+            }
           }
         }
       }
@@ -511,10 +515,18 @@ function recordLateStartPenalty(operatorName, department, kpNo) {
 }
 
 function checkAndAutoForwardJobs() {
+  // 1. Only admins run system-level forwarding checks
+  if (!currentUser || (currentUser.role !== "super_admin" && currentUser.role !== "production_admin")) {
+    return;
+  }
+
   const prodStages = ["Masking", "Spraying", "Grinding", "Polishing"];
   const now = new Date();
   let updated = false;
   if (!Array.isArray(jobs)) return;
+
+  // Initialize session tracking set if not exists
+  window._forwardedKPsInSession = window._forwardedKPsInSession || new Set();
 
   jobs.forEach(job => {
     if (!prodStages.includes(job.currentDepartment)) return;
@@ -537,6 +549,12 @@ function checkAndAutoForwardJobs() {
     if (limitMs === null) return;
 
     if (elapsedMs >= limitMs) {
+      const trackingKey = `${job.kpNumber}_${stageKey}`;
+      if (window._forwardedKPsInSession.has(trackingKey)) {
+        return; // Prevent duplicate forwarding attempts for same job/stage in this session
+      }
+      window._forwardedKPsInSession.add(trackingKey);
+
       const currentOp = job[stageKey].operatorName || "";
       const nextOp = getNextOperatorForDepartment(currentOp, job.currentDepartment);
       
@@ -558,7 +576,10 @@ function checkAndAutoForwardJobs() {
         updates[`${stageKey}.operatorName`] = nextOp;
         updates[`stageAssignedAt.${stageKey}`] = job.stageAssignedAt[stageKey];
         updates[`${stageKey}.queueEntryTime`] = job.stageAssignedAt[stageKey];
-        db.collection("jobs").doc(job.id).update(updates).catch(e => console.error("Firestore auto-forward err:", e));
+        db.collection("jobs").doc(job.id).update(updates).catch(e => {
+          console.warn("Firestore auto-forward write failed:", e.message || e);
+          handleFirestoreError("auto-forward-write", e);
+        });
       }
     }
   });
@@ -727,20 +748,76 @@ function getOeeStorageKey(dept) {
   return `psp_oee_${dept.toLowerCase()}_${currentUser.email}_${dateStr}`;
 }
 
+let oeeMemoryCache = {};
+
 function loadOeeState(dept) {
+  const dKey = dept.toLowerCase();
+  if (oeeMemoryCache[dKey]) {
+    return oeeMemoryCache[dKey];
+  }
+  
   const key = getOeeStorageKey(dept);
   if (!key) return { noWork: 0, idle: 0, active: 0 };
   const stored = localStorage.getItem(key);
   if (stored) {
-    try { return JSON.parse(stored); } catch (e) {}
+    try {
+      const parsed = JSON.parse(stored);
+      oeeMemoryCache[dKey] = parsed;
+      return parsed;
+    } catch (e) {}
   }
-  return { noWork: 0, idle: 0, active: 0 };
+  const defaultState = { noWork: 0, idle: 0, active: 0 };
+  oeeMemoryCache[dKey] = defaultState;
+  return defaultState;
 }
 
-function saveOeeState(dept, state) {
-  const key = getOeeStorageKey(dept);
-  if (key) {
-    localStorage.setItem(key, JSON.stringify(state));
+function saveOeeState(dept, state, persistImmediately = false) {
+  const dKey = dept.toLowerCase();
+  oeeMemoryCache[dKey] = state;
+  
+  if (persistImmediately) {
+    const key = getOeeStorageKey(dept);
+    if (key) {
+      localStorage.setItem(key, JSON.stringify(state));
+    }
+  }
+}
+
+function persistOeeCacheToLocalStorage() {
+  ["Masking", "Spraying", "Grinding", "Polishing"].forEach(dept => {
+    const dKey = dept.toLowerCase();
+    if (oeeMemoryCache[dKey]) {
+      const key = getOeeStorageKey(dept);
+      if (key) {
+        localStorage.setItem(key, JSON.stringify(oeeMemoryCache[dKey]));
+      }
+    }
+  });
+}
+
+// Persist on tab close or page hide to prevent data loss
+window.addEventListener("beforeunload", () => {
+  persistOeeCacheToLocalStorage();
+});
+window.addEventListener("pagehide", () => {
+  persistOeeCacheToLocalStorage();
+});
+
+function updateSystemOnlineStatus() {
+  const dot = document.querySelector(".indicator-dot");
+  const text = document.querySelector(".indicator-text");
+  if (!dot || !text) return;
+  
+  if (isMockMode()) {
+    dot.className = "indicator-dot hold";
+    dot.style.background = "#eab308";
+    text.textContent = "OFFLINE FALLBACK MODE";
+    text.style.color = "#eab308";
+  } else {
+    dot.className = "indicator-dot online";
+    dot.style.background = "#10b981";
+    text.textContent = "SHOP FLOOR ONLINE";
+    text.style.color = "";
   }
 }
 
@@ -1461,11 +1538,26 @@ function shouldBypassMasking(partName) {
 }
 
 async function autoSyncJobsFromSpreadsheet(records) {
+  if (!isMockMode() && !_initialFirestoreLoadComplete) {
+    console.log("[Auto-Sync] Skipping auto-sync on startup because initial Firestore snapshot is not yet loaded.");
+    return;
+  }
   window.autoImportedKPs = window.autoImportedKPs || new Set();
   let anyChange = false;
   
+  // Build a Map of existing jobs by kpNumber for fast O(1) lookups
+  const jobsMap = new Map();
+  if (Array.isArray(jobs)) {
+    jobs.forEach(j => {
+      if (j.kpNumber) {
+        jobsMap.set(j.kpNumber.toLowerCase(), j);
+      }
+    });
+  }
+  
   for (const record of records) {
     const kpNo = record.kpNo;
+    if (!kpNo) continue;
     
     // Determine target stage:
     // If Column Y (Status) is NOT "done", target department is "Inspection".
@@ -1490,7 +1582,7 @@ async function autoSyncJobsFromSpreadsheet(records) {
     }
     
     // Check if the job already exists in local list
-    const existingJob = jobs.find(j => j.kpNumber.toLowerCase() === kpNo.toLowerCase());
+    const existingJob = jobsMap.get(kpNo.toLowerCase());
     
     if (existingJob) {
       // Sync quantity and metadata if they differ from spreadsheet
@@ -1692,6 +1784,12 @@ function loadFirebaseSDKs(callback) {
   }
   
   if (typeof firebase !== 'undefined') {
+    if (!firebase.apps.length) {
+      firebase.initializeApp(firebaseConfig);
+    }
+    try {
+      firebase.firestore.setLogLevel('silent');
+    } catch (e) {}
     callback();
     return;
   }
@@ -1708,6 +1806,9 @@ function loadFirebaseSDKs(callback) {
         if (!firebase.apps.length) {
           firebase.initializeApp(firebaseConfig);
         }
+        try {
+          firebase.firestore.setLogLevel('silent');
+        } catch (e) {}
         callback();
       };
       document.head.appendChild(sStore);
@@ -1917,6 +2018,29 @@ function isTabAuthorized(tabId) {
   return false;
 }
 
+function loadCachedData() {
+  try {
+    const cachedJobs = localStorage.getItem("psp_cached_jobs");
+    if (cachedJobs) jobs = JSON.parse(cachedJobs);
+    
+    const cachedUsers = localStorage.getItem("psp_cached_users");
+    if (cachedUsers) users = JSON.parse(cachedUsers);
+    
+    const cachedOperators = localStorage.getItem("psp_cached_operators");
+    if (cachedOperators) operators = JSON.parse(cachedOperators);
+    
+    const cachedMaterials = localStorage.getItem("psp_cached_materials");
+    if (cachedMaterials) materials = JSON.parse(cachedMaterials);
+    
+    const cachedAudit = localStorage.getItem("psp_cached_audit_logs");
+    if (cachedAudit) auditLogs = JSON.parse(cachedAudit);
+    
+    console.log(`[Cache] Loaded offline/startup cache: jobs=${jobs.length}, operators=${operators.length}`);
+  } catch (e) {
+    console.warn("Failed to load cached local data:", e);
+  }
+}
+
 function getDefaultTab() {
   if (!currentUser) return 'tab-masking';
   const role = currentUser.role;
@@ -1952,6 +2076,9 @@ async function initApp() {
     window.location.href = "login.html";
     return;
   }
+
+  // Load cached database immediately for instant, lag-free rendering on page load/refresh
+  loadCachedData();
 
   // Set up permissions and initial routing IMMEDIATELY to prevent UI flicker
   initTheme();
@@ -2638,7 +2765,8 @@ async function sendBackendPost(payload) {
     
     throw new Error(`Unhandled transaction type: ${reqType}`);
   } catch (err) {
-    console.error("Firestore post sync error:", err);
+    console.warn("Firestore post sync error:", err.message || err);
+    handleFirestoreError("backend-post-write", err);
     logErrorToFirestore("sendBackendPost", err);
     throw err;
   }
@@ -2668,7 +2796,8 @@ async function createFirestoreAuditLog(userEmail, department, kpNumber, action, 
       details: details || `${userRole.toUpperCase()} action: ${action}`
     });
   } catch (err) {
-    console.error("Failed to write firestore audit log:", err);
+    console.warn("Failed to write firestore audit log:", err.message || err);
+    handleFirestoreError("audit-log-write", err);
   }
 }
 
@@ -2688,6 +2817,58 @@ function logErrorToFirestore(action, error) {
     });
   } catch(e) {
     console.error("Failed to write error log to firestore:", e);
+  }
+}
+
+function handleFirestoreError(source, err) {
+  console.error(`[Firestore Error] from ${source}:`, err);
+  const errMsg = String(err.message || err || "").toLowerCase();
+  
+  if (
+    errMsg.includes("quota") || 
+    errMsg.includes("limit") || 
+    errMsg.includes("exceeded") || 
+    errMsg.includes("resource-exhausted") || 
+    errMsg.includes("permission-denied") || 
+    errMsg.includes("unavailable")
+  ) {
+    if (localStorage.getItem("psp_auth_mock") !== "true") {
+      console.warn("⚠️ Firestore quota/limit exceeded or resource exhausted. Falling back to Mock/Offline Mode...");
+      localStorage.setItem("psp_auth_mock", "true");
+      
+      // Unsubscribe all active listeners immediately to prevent crash loops
+      if (Array.isArray(firestoreListeners)) {
+        firestoreListeners.forEach(unsub => {
+          try { unsub(); } catch(e) {}
+        });
+        firestoreListeners = [];
+      }
+
+      // Terminate Firestore and delete Firebase app to completely stop background reconnection retries
+      try {
+        if (typeof firebase !== 'undefined') {
+          firebase.firestore().terminate().catch(() => {});
+          firebase.app().delete().catch(() => {});
+        }
+      } catch (e) {
+        console.warn("Failed to shut down Firebase background threads:", e);
+      }
+      
+      // Load offline state and render
+      if (typeof loadState === 'function') {
+        loadState().then(() => {
+          renderAll();
+          if (typeof showToast === 'function') {
+            showToast(
+              "⚠️ Offline Mode Fallback", 
+              "Firebase daily usage limit exceeded. We've switched you to offline mode so you can continue working smoothly. Your changes will save locally.", 
+              "warning", 
+              15000
+            );
+          }
+        });
+      }
+    }
   }
 }
 
@@ -2742,13 +2923,16 @@ function startFirestoreListeners() {
       });
       
       jobs = tempJobs;
+      try {
+        localStorage.setItem("psp_cached_jobs", JSON.stringify(tempJobs));
+      } catch (e) {}
+      _initialFirestoreLoadComplete = true;
       if (typeof autoAssignPendingJobs === "function") {
         autoAssignPendingJobs();
       }
       renderAll();
     }, err => {
-      console.error("Jobs listener error:", err);
-      logErrorToFirestore("jobs-listener", err);
+      handleFirestoreError("jobs-listener", err);
     });
     firestoreListeners.push(unsubJobs);
     
@@ -2774,9 +2958,13 @@ function startFirestoreListeners() {
       if (tempOperators.length > 0) {
         operators = tempOperators;
       }
+      try {
+        localStorage.setItem("psp_cached_users", JSON.stringify(tempUsers));
+        localStorage.setItem("psp_cached_operators", JSON.stringify(tempOperators));
+      } catch (e) {}
       renderAll();
     }, err => {
-      console.error("Users listener error:", err);
+      handleFirestoreError("users-listener", err);
     });
     firestoreListeners.push(unsubUsers);
     
@@ -2789,7 +2977,7 @@ function startFirestoreListeners() {
       machines = tempMachines;
       renderAll();
     }, err => {
-      console.error("Machines listener error:", err);
+      handleFirestoreError("machines-listener", err);
     });
     firestoreListeners.push(unsubMachines);
     
@@ -2800,9 +2988,12 @@ function startFirestoreListeners() {
         tempMaterials.push(doc.data());
       });
       materials = tempMaterials;
+      try {
+        localStorage.setItem("psp_cached_materials", JSON.stringify(tempMaterials));
+      } catch (e) {}
       renderAll();
     }, err => {
-      console.error("Materials listener error:", err);
+      handleFirestoreError("materials-listener", err);
     });
     firestoreListeners.push(unsubMaterials);
     
@@ -2825,9 +3016,12 @@ function startFirestoreListeners() {
           });
         });
         auditLogs = tempAudit;
+        try {
+          localStorage.setItem("psp_cached_audit_logs", JSON.stringify(tempAudit));
+        } catch (e) {}
         renderAll();
       }, err => {
-        console.error("Audit logs listener error:", err);
+        handleFirestoreError("audit-logs-listener", err);
       });
       firestoreListeners.push(unsubAudit);
     }
@@ -2841,7 +3035,7 @@ function startFirestoreListeners() {
       window.departmentsList = tempDepts;
       renderAll();
     }, err => {
-      console.error("Departments listener error:", err);
+      handleFirestoreError("departments-listener", err);
     });
     firestoreListeners.push(unsubDepts);
     
@@ -2855,7 +3049,7 @@ function startFirestoreListeners() {
         window.systemMonitoringData = tempSys;
         renderAll();
       }, err => {
-        console.error("System monitoring listener error:", err);
+        handleFirestoreError("system-monitoring-listener", err);
       });
       firestoreListeners.push(unsubSys);
     }
@@ -2870,7 +3064,7 @@ function startFirestoreListeners() {
         window.errorLogsData = tempErr;
         renderAll();
       }, err => {
-        console.error("Error logs listener error:", err);
+        handleFirestoreError("error-logs-listener", err);
       });
       firestoreListeners.push(unsubErr);
     }
@@ -2884,7 +3078,7 @@ function startFirestoreListeners() {
       window.notificationsData = tempNotifications;
       renderAll();
     }, err => {
-      console.error("Notifications listener error:", err);
+      handleFirestoreError("notifications-listener", err);
     });
     firestoreListeners.push(unsubNotifications);
     
@@ -2994,10 +3188,17 @@ async function seedFirestoreDatabaseIfEmpty() {
   }
 }
 
+let _stateFetchInProgress = false;
+
 async function loadState() {
   if (!isMockMode()) {
     return;
   }
+  if (_stateFetchInProgress) {
+    console.log("[State] Fetch already in progress — ignoring concurrent request.");
+    return;
+  }
+  _stateFetchInProgress = true;
   try {
     const [jobsRes, operatorsRes, materialsRes, auditLogsRes] = await Promise.all([
       fetch(scriptUrl + "?action=getJobs").then(r => r.json()),
@@ -3106,6 +3307,13 @@ async function loadState() {
     } else {
       auditLogs = [];
     }
+    try {
+      localStorage.setItem("psp_cached_jobs", JSON.stringify(jobs));
+      localStorage.setItem("psp_cached_users", JSON.stringify(users));
+      localStorage.setItem("psp_cached_operators", JSON.stringify(operators));
+      localStorage.setItem("psp_cached_materials", JSON.stringify(materials));
+      localStorage.setItem("psp_cached_audit_logs", JSON.stringify(auditLogs));
+    } catch (e) {}
     console.log("State loaded successfully from Sheets backend.");
   } catch (err) {
     console.warn("Could not load state from backend (offline?):", err);
@@ -3118,11 +3326,17 @@ async function loadState() {
       materials = [...SEED_MATERIALS];
       auditLogs = [...SEED_AUDIT_LOGS];
     }
+  } finally {
+    _stateFetchInProgress = false;
   }
 }
 
 function saveState() {
-  // Production data is persisted live to Google Sheets via POST endpoints. No local storage write.
+  try {
+    localStorage.setItem("psp_cached_jobs", JSON.stringify(jobs));
+  } catch (e) {
+    console.warn("Failed to save local state:", e);
+  }
 }
 
 
@@ -3145,6 +3359,9 @@ function startClock() {
 
 function startAutoRefresh() {
   setInterval(async () => {
+    if (!isMockMode()) {
+      return; // Skip auto-refresh completely if in Firebase mode to prevent redundant renderAll lag spikes
+    }
     if (pendingSyncCount > 0) {
       console.log("Skipping auto-refresh because backend sync is in progress.");
       return;
@@ -3548,13 +3765,26 @@ function formatDuration(ms) {
   ].join(':');
 }
 
-// 6. GLOBAL RENDERING MANAGER
+// 6. GLOBAL RENDERING MANAGER (Debounced to prevent multiple layout thrashing on rapid state updates)
+let _renderAllTimeout = null;
+
 function renderAll() {
+  if (_renderAllTimeout) return;
+  _renderAllTimeout = setTimeout(() => {
+    _renderAllTimeout = null;
+    executeRenderAll();
+  }, 50); // Coalesce rendering updates within 50ms
+}
+
+function executeRenderAll() {
   applyControlRestrictions();
   checkTATAlerts();
   
   // Update sidebar count indicators
   updateSidebarCounts();
+
+  // Update header online/offline fallback status indicator
+  updateSystemOnlineStatus();
   
   const activeTabPane = document.querySelector(".tab-pane.active");
   const activeTabId = activeTabPane ? activeTabPane.id : "";
@@ -3607,8 +3837,8 @@ function renderAll() {
 
 function updateSidebarCounts() {
   const countInspect = jobs.filter(j => j.currentDepartment === "Inspection").length;
-  const countMasking = jobs.filter(j => j.currentDepartment === "Masking" && j.masking.status !== "Completed").length;
-  const countSpraying = jobs.filter(j => j.currentDepartment === "Spraying" && j.spraying.status === "Pending").length;
+  const countMasking = jobs.filter(j => j.currentDepartment === "Masking" && j.masking?.status !== "Completed").length;
+  const countSpraying = jobs.filter(j => j.currentDepartment === "Spraying" && j.spraying?.status === "Pending").length;
   const countGrinding = jobs.filter(j => j.currentDepartment === "Grinding").length;
   const countPolishing = jobs.filter(j => j.currentDepartment === "Polishing").length;
   const countFinal = jobs.filter(j => j.currentDepartment === "Final Inspection").length;
@@ -3680,10 +3910,16 @@ function renderWorkflowOverview() {
   // Filter jobs list for table & Kanban views
   const filteredJobs = getFilteredJobs(jobs);
 
+  const activeJobs = filteredJobs.filter(j => j.currentDepartment !== "Dispatched" && j.status !== "Completed" && j.currentDepartment !== "Completed");
+  const completedJobs = filteredJobs.filter(j => j.currentDepartment === "Dispatched" || j.status === "Completed" || j.currentDepartment === "Completed");
+  
+  // Show all active jobs plus the 20 most recently completed jobs in the active stage tracker table
+  const displayJobs = [...activeJobs, ...completedJobs.slice(-20)];
+
   const tbody = document.getElementById("overview-jobs-list");
   tbody.innerHTML = "";
 
-  filteredJobs.forEach(job => {
+  displayJobs.forEach(job => {
     const tr = document.createElement("tr");
     
     let priorityClass = "";
@@ -3712,7 +3948,7 @@ function renderWorkflowOverview() {
 
   // Render secondary Zoho Project views
   renderGanttTimeline();
-  renderKanbanBoard(filteredJobs);
+  renderKanbanBoard(activeJobs);
 }
 
 function renderGanttTimeline() {
@@ -4536,19 +4772,25 @@ async function approveInspectionJob(kpNumber) {
 
 // 9. TAB VIEW: MASKING DASHBOARD
 function renderMaskingDashboard() {
-  // Update supervisor cards and production summaries
+  // Always render supervisor panel and daily summary (very fast text/numbers updates)
   renderSupervisorPanel();
   renderDailySummary();
   
-  // Render queues, cards, histories
-  renderLiveJobQueue();
-  renderActiveJobTimer();
-  renderActiveJobCards();
-  renderMaterialConsumption();
-  renderHoldManagementPanel();
-  renderOperatorRegistry();
-  renderCycleChronology();
-  renderJobHistory();
+  // Render subtabs selectively based on the active subtab pane
+  if (activeMaskingSubtab === "masking-subtab-queue") {
+    renderLiveJobQueue();
+  } else if (activeMaskingSubtab === "masking-subtab-active") {
+    renderActiveJobTimer();
+    renderActiveJobCards();
+    renderMaterialConsumption();
+    renderHoldManagementPanel();
+  } else if (activeMaskingSubtab === "masking-subtab-materials") {
+    renderMaterialConsumption();
+  } else if (activeMaskingSubtab === "masking-subtab-supervisor") {
+    renderOperatorRegistry();
+    renderCycleChronology();
+    renderJobHistory();
+  }
 }
 
 // Module 7: Supervisor Control Panel
@@ -4949,11 +5191,18 @@ function startStateTimer() {
         else if (mode === "IDLE") state.idle += elapsedSec;
         else if (mode === "ACTIVE") state.active += elapsedSec;
         
-        saveOeeState(dept, state);
+        saveOeeState(dept, state, false); // Save to in-memory cache only
         if (activeTabId === `tab-${dept.toLowerCase()}`) {
           updateOeeUi(dept, state, mode);
         }
       });
+      
+      // Persist cache to localStorage every 10 seconds to avoid disk thrashing
+      window._oeeSaveTicks = (window._oeeSaveTicks || 0) + 1;
+      if (window._oeeSaveTicks >= 10) {
+        window._oeeSaveTicks = 0;
+        persistOeeCacheToLocalStorage();
+      }
     }
   }, 1000);
 }
@@ -5638,9 +5887,14 @@ function renderJobHistory() {
 // 10. TAB VIEW: SPRAYING DASHBOARD
 function renderSprayingDashboard() {
   renderSprayingKpis();
-  renderSprayingLiveQueue();
-  renderSprayingActiveJobTimer();
-  renderSprayingHistory();
+  
+  if (activeSprayingSubtab === "spraying-subtab-queue") {
+    renderSprayingLiveQueue();
+  } else if (activeSprayingSubtab === "spraying-subtab-active") {
+    renderSprayingActiveJobTimer();
+  } else if (activeSprayingSubtab === "spraying-subtab-history") {
+    renderSprayingHistory();
+  }
 }
 
 function renderSprayingKpis() {
@@ -7100,84 +7354,6 @@ async function submitCompleteMasking(e) {
 
 // ==================== STAGE DASHBOARDS & USER MANAGEMENT (NEW STAGES & CRUD) ====================
 
-function renderGrindingDashboard() {
-  const tbody = document.getElementById("grinding-queue-list");
-  if (!tbody) return;
-  tbody.innerHTML = "";
-  
-  const grindingJobs = jobs.filter(j => j.currentDepartment === "Grinding");
-  if (grindingJobs.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted">No components in grinding stage.</td></tr>`;
-    return;
-  }
-  
-  const isReadOnly = (currentUser && currentUser.role === 'hr_admin');
-  
-  grindingJobs.forEach(job => {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td class="font-mono font-bold text-cyan">${job.kpNumber}</td>
-      <td>${job.partName}</td>
-      <td>${job.customer}</td>
-      <td class="font-mono">${job.quantity}</td>
-      <td><span class="badge badge-pending">Grinding Pending</span></td>
-      <td>${job.priority}</td>
-      <td>
-        <select id="grinding-next-stage-${job.kpNumber}" class="form-input select-sm" style="display:inline-block; width:auto; margin-right:5px; height:30px; padding:2px 5px; font-size:12px;" ${isReadOnly ? 'disabled style="display:none;"' : ''}>
-          <option value="Inspection">Inspection</option>
-          <option value="Masking">Masking</option>
-          <option value="Spraying">Spraying</option>
-          <option value="Grinding">Grinding</option>
-          <option value="Polishing" selected>Polishing</option>
-          <option value="Final Inspection">Final Inspection</option>
-          <option value="Dispatch">Dispatch</option>
-        </select>
-        <button class="btn btn-success btn-xs" onclick="progressGrindingJob('${job.kpNumber}')" ${isReadOnly ? 'disabled style="display:none;"' : ''}>Complete Grinding</button>
-      </td>
-    `;
-    tbody.appendChild(tr);
-  });
-}
-
-async function progressGrindingJob(kpNumber) {
-  const job = jobs.find(j => j.kpNumber === kpNumber);
-  if (job) {
-    const selectEl = document.getElementById(`grinding-next-stage-${kpNumber}`);
-    const nextDept = selectEl ? selectEl.value : "Polishing";
-    
-    const payload = {
-      type: "END_CYCLE",
-      kpNo: kpNumber,
-      stage: "Grinding",
-      operatorName: getLoggedUser().name,
-      endTime: new Date().toISOString(),
-      activeTimeMs: 0,
-      nextStage: nextDept
-    };
-    
-    // Optimistic UI mutation
-    transitionToStage(job, nextDept, getLoggedUser().name);
-    renderAll();
-
-    // Background sync
-    pendingSyncCount++;
-    sendBackendPost(payload)
-      .then(() => {
-        pendingSyncCount--;
-        if (pendingSyncCount === 0) {
-          return loadState().then(() => renderAll());
-        }
-      })
-      .catch(err => {
-        pendingSyncCount--;
-        console.error("Failed to sync grinding progression:", err);
-        if (pendingSyncCount === 0) {
-          return loadState().then(() => renderAll());
-        }
-      });
-  }
-}
-
 function setupGrindingSubtabs() {
   const subtabButtons = document.querySelectorAll(".grinding-tab-btn");
   const subtabPanels = document.querySelectorAll(".grinding-subtab-panel");
@@ -7227,10 +7403,15 @@ function switchToGrindingSubtab(subtabId) {
 
 function renderGrindingDashboard() {
   renderGrindingKpis();
-  renderGrindingLiveQueue();
-  renderGrindingActiveJobTimer();
-  renderGrindingActiveCards();
-  renderGrindingHistory();
+  
+  if (activeGrindingSubtab === "grinding-subtab-queue") {
+    renderGrindingLiveQueue();
+  } else if (activeGrindingSubtab === "grinding-subtab-active") {
+    renderGrindingActiveJobTimer();
+    renderGrindingActiveCards();
+  } else if (activeGrindingSubtab === "grinding-subtab-history") {
+    renderGrindingHistory();
+  }
 }
 
 function renderGrindingKpis() {
@@ -8551,7 +8732,6 @@ function showToast(title, message, type = 'info') {
 window.showToast = showToast;
 
 // Expose stage functions to global window scope so onclick bindings can reach them
-window.progressGrindingJob = progressGrindingJob;
 window.triggerPolishingFloatingTransition = triggerPolishingFloatingTransition;
 window.triggerFinalInspectionFloatingTransition = triggerFinalInspectionFloatingTransition;
 window.triggerDispatchFloatingTransition = triggerDispatchFloatingTransition;
