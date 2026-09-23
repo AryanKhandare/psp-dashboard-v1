@@ -1,4 +1,3 @@
-
 // Controller: Show local loading message & disable inspection inputs
 function showInspectionLoading() {
   const loadingEl = document.getElementById("inspection-loading-msg");
@@ -128,7 +127,14 @@ function updateInspectionDropdowns() {
     const currentQty = qtySelect.value;
     
     // Exclude delivered records from all operator dropdowns (case-insensitive)
-    const activeRecords = inspectionMasterRecords.filter(r => !r.status || r.status.toLowerCase() !== 'delivered');
+    // Pre-inspection dropdown shows ONLY jobs still pending pre-inspection:
+    // not delivered AND pre-inspection status (column Z) is not "Done".
+    // Jobs already inspected are still fetched so auto-sync can move them to Masking / Final Inspection.
+    const activeRecords = inspectionMasterRecords.filter(r => {
+      if (r.status && r.status.toLowerCase() === 'delivered') return false;
+      if (r.statusY && r.statusY.trim().toLowerCase() === 'done') return false;
+      return true;
+    });
     
     const isKpSelected = !!currentKp;
     
@@ -299,8 +305,9 @@ async function loadInspectionKPs(forceRefresh = false, isAutoRefresh = false) {
   );
 
   try {
-    // Query column T (KP No), F (Customer), I (Part Name), J (Qty), C (Delivered Status), V (Assigned), A (Timestamp), X (Actual), Y (Status), S (JC No), AM (FIR ST), AU (Process Type), W (Inspection/Arrival Date), AK (Planned Completion Date)
-    let query = "SELECT T, F, I, J, C, V, A, X, Y, S, AM, AU, W, AK WHERE T IS NOT NULL AND (C IS NULL OR LOWER(C) != 'delivered')";
+    // Column map for the 26-27 sheet (a "Status Valid/Invalid" column W was added, so everything from W onward shifted right by one):
+    // T (KP No), F (Customer), I (Part Name), J (Qty), C (Delivered Status), V (Assigned), A (Timestamp), Y (Pre-Insp Actual), Z (Pre-Insp Status), S (JC No), AN (FIR ST), AV (Processes), X (Pre-Insp Planned), AL (FIR Planned / Completion)
+    let query = "SELECT T, F, I, J, C, V, A, Y, Z, S, AN, AV, X, AL WHERE T IS NOT NULL AND (C IS NULL OR LOWER(C) != 'delivered')";
     if (op) {
       const lowerOp = op.trim().toLowerCase();
       query += ` AND (LOWER(V) = '${lowerOp}' OR LOWER(V) LIKE '${lowerOp} /%' OR LOWER(V) LIKE '%/ ${lowerOp}' OR LOWER(V) LIKE '%/ ${lowerOp} /%')`;

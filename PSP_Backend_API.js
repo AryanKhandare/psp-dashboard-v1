@@ -1182,8 +1182,8 @@ function fetchAndCacheInspectionMasterRecords_() {
   let statusCol = 3; // fallback C
   let assignedFirstCol = 22; // fallback V
   let timestampCol = 1; // fallback A
-  let inspDateCol = 23; // fallback W (Planned Date of Inspection / Arrival)
-  let compDateCol = 37; // fallback AK (Planned Date of Completion)
+  let inspDateCol = 24; // fallback X (Pre-Inspection Planned) — 26-27 sheet layout
+  let compDateCol = 38; // fallback AL (FIR Planned / Completion) — 26-27 sheet layout
   
   headers.forEach((h, idx) => {
     const cleaned = cleanHeader_(h);
