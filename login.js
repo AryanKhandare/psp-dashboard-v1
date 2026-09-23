@@ -997,7 +997,10 @@ document.addEventListener("DOMContentLoaded", () => {
     "Masking": ["SJ", "DN", "Tripati", "GN", "Vikrant", "Sameer", "Dhuryodhan", "TJ"],
     "Spraying": ["prism", "Suraj", "Amrish", "Duryodhan", "TJ", "Bhushan", "Avinash"],
     "Grinding": ["Dhuryodhan", "Vikrant"],
-    "Polishing": ["Operator"]
+    "Polishing": ["Operator"],
+    // Inspection names must match the Firestore user "name" field exactly,
+    // and the email prefix must match column V in the sheet (mf@ -> MF, laxmi@ -> Laxmi)
+    "Inspection": ["MF", "SJ", "VG", "GT", "JN", "Laxmi"]
   };
 
   const populateOperatorNames = () => {
