@@ -306,8 +306,9 @@ async function loadInspectionKPs(forceRefresh = false, isAutoRefresh = false) {
 
   try {
     // Column map for the 26-27 sheet (a "Status Valid/Invalid" column W was added, so everything from W onward shifted right by one):
+    // Rows with W (Status) = "Invalid" are excluded entirely (not shown, not auto-synced).
     // T (KP No), F (Customer), I (Part Name), J (Qty), C (Delivered Status), V (Assigned), A (Timestamp), Y (Pre-Insp Actual), Z (Pre-Insp Status), S (JC No), AN (FIR ST), AV (Processes), X (Pre-Insp Planned), AL (FIR Planned / Completion)
-    let query = "SELECT T, F, I, J, C, V, A, Y, Z, S, AN, AV, X, AL WHERE T IS NOT NULL AND (C IS NULL OR LOWER(C) != 'delivered')";
+    let query = "SELECT T, F, I, J, C, V, A, Y, Z, S, AN, AV, X, AL WHERE T IS NOT NULL AND (C IS NULL OR LOWER(C) != 'delivered') AND (W IS NULL OR LOWER(W) != 'invalid')";
     if (op) {
       const lowerOp = op.trim().toLowerCase();
       query += ` AND (LOWER(V) = '${lowerOp}' OR LOWER(V) LIKE '${lowerOp} /%' OR LOWER(V) LIKE '%/ ${lowerOp}' OR LOWER(V) LIKE '%/ ${lowerOp} /%')`;
@@ -593,6 +594,11 @@ function renderAdminInspectionTracking() {
       const isDel = r.status && r.status.toLowerCase() === 'delivered';
       if (filterStat === 'Delivered' && !isDel) return false;
       if (filterStat === 'Active' && isDel) return false;
+      // Pre-Inspection Pending: same rule as the operator dropdown (column Z not "Done")
+      if (filterStat === 'PendingPreInsp') {
+        if (isDel) return false;
+        if (r.statusY && r.statusY.trim().toLowerCase() === 'done') return false;
+      }
     }
     return true;
   });
