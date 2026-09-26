@@ -320,7 +320,7 @@
     // ── DYNAMIC REACT LOADER & TRANSPILER ─────────────────────────────────────
     async function initReactDashboard() {
       try {
-        const response = await fetch('spraying_frontend.js?t=' + Date.now());
+        const response = await fetch('js/spraying_frontend.js?t=' + Date.now());
         if (!response.ok) throw new Error("Failed to load spraying_frontend.js");
         let code = await response.text();
 

@@ -416,7 +416,22 @@ async function seedFirestoreDatabaseIfEmpty() {
       { name: "Duryodhan", email: "duryodhan.spraying@plasmaspray.co.in", role: "operator", department: "Spraying", pin: "600004" },
       { name: "TJ", email: "tj.spraying@plasmaspray.co.in", role: "operator", department: "Spraying", pin: "600005" },
       { name: "Bhushan", email: "bhushan.spraying@plasmaspray.co.in", role: "operator", department: "Spraying", pin: "600006" },
-      { name: "Avinash", email: "avinash.spraying@plasmaspray.co.in", role: "operator", department: "Spraying", pin: "600007" }
+      { name: "Avinash", email: "avinash.spraying@plasmaspray.co.in", role: "operator", department: "Spraying", pin: "600007" },
+
+      // Inspection Operators
+      { name: "MF", email: "mf@plasmaspray.co.in", role: "operator", department: "Inspection", pin: "123456" },
+      { name: "SJ", email: "sj.inspection@plasmaspray.co.in", role: "operator", department: "Inspection", pin: "123456" },
+      { name: "VG", email: "vg@plasmaspray.co.in", role: "operator", department: "Inspection", pin: "123456" },
+      { name: "GT", email: "gt@plasmaspray.co.in", role: "operator", department: "Inspection", pin: "123456" },
+      { name: "JN", email: "jn@plasmaspray.co.in", role: "operator", department: "Inspection", pin: "123456" },
+      { name: "Laxmi", email: "laxmi@plasmaspray.co.in", role: "operator", department: "Inspection", pin: "123456" },
+
+      // Grinding Operators
+      { name: "Dhuryodhan", email: "dhuryodhan.grinding@plasmaspray.co.in", role: "operator", department: "Grinding", pin: "700001" },
+      { name: "Vikrant", email: "vikrant.grinding@plasmaspray.co.in", role: "operator", department: "Grinding", pin: "700002" },
+
+      // Polishing Operators
+      { name: "Operator", email: "polishing.operator@plasmaspray.co.in", role: "operator", department: "Polishing", pin: "800001" }
     ];
 
     for (const op of opsToSeed) {
@@ -434,6 +449,17 @@ async function seedFirestoreDatabaseIfEmpty() {
           emailVerified: true
         });
         console.log(`[Firestore Seed] Auto-created operator record for: ${op.name} (${op.email})`);
+      } else {
+        const doc = q.docs[0];
+        const data = doc.data();
+        if (data.department === op.department && (data.role !== op.role || !data.name || data.name !== op.name)) {
+          await db.collection("users").doc(doc.id).update({
+            name: op.name,
+            role: op.role,
+            pin: data.pin || op.pin
+          });
+          console.log(`[Firestore Seed] Updated operator record for: ${op.name} (${op.email})`);
+        }
       }
     }
   } catch (err) {
