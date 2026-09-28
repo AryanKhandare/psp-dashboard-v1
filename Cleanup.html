@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Job cleanup – PSP MES</title>
+<style>
+  :root { --ink:#1b2430; --muted:#5d6b7a; --line:#d6dde5; --bg:#f3f5f8; --panel:#fff;
+          --blue:#1c5fa8; --red:#b3261e; --green:#1e7a46; --amber:#9a6200; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: "Segoe UI", Roboto, Arial, sans-serif; color:var(--ink); background:var(--bg); font-size:14px; }
+  main { max-width:1200px; margin:0 auto; padding:24px 16px 60px; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  p.lead { color:var(--muted); margin:0 0 20px; max-width:70ch; line-height:1.5; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:16px; margin-bottom:16px; }
+  .row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+  button { font:inherit; padding:8px 14px; border-radius:4px; border:1px solid var(--blue); background:var(--blue); color:#fff; cursor:pointer; }
+  button.secondary { background:#fff; color:var(--blue); }
+  button.danger { background:var(--red); border-color:var(--red); }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  button:focus-visible, select:focus-visible, input:focus-visible { outline:3px solid #8fb8e8; outline-offset:1px; }
+  select, input[type=text] { font:inherit; padding:7px 8px; border:1px solid var(--line); border-radius:4px; background:#fff; }
+  #status { color:var(--muted); }
+  #status.err { color:var(--red); font-weight:600; }
+  table { width:100%; border-collapse:collapse; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { background:#eef2f6; font-weight:600; position:sticky; top:0; }
+  .scroll { overflow:auto; max-height:560px; border:1px solid var(--line); border-radius:4px; }
+  .num { text-align:right; font-variant-numeric: tabular-nums; }
+  .tag { display:inline-block; padding:1px 7px; border-radius:10px; font-size:12px; font-weight:600; white-space:nowrap; }
+  .DELETE { background:#fbe3e1; color:var(--red); }
+  .COMPLETE { background:#e1f2e8; color:var(--green); }
+  .MOVE_FINAL { background:#e3ecf8; color:var(--blue); }
+  .REVIEW { background:#fbf0d9; color:var(--amber); }
+  .KEEP { background:#eceff2; color:var(--muted); }
+  #log { font-family: Consolas, monospace; font-size:12px; white-space:pre-wrap; max-height:220px; overflow:auto; background:#f7f9fb; padding:8px; border-radius:4px; }
+  .hidden { display:none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Job cleanup: match Firebase to the Q2P sheet</h1>
+  <p class="lead">Compares every open job in the dashboard with the 26-27 sheet (and the old 25-26 sheet for older KPs) and proposes a fix for each one. Nothing is changed until you tick the rows and click <strong>Apply selected changes</strong>. A backup file downloads automatically before anything is written.</p>
+
+  <div class="panel">
+    <div class="row">
+      <button id="btn-scan" disabled>Scan jobs</button>
+      <span id="status">Checking login…</span>
+    </div>
+  </div>
+
+  <div id="results" class="hidden">
+    <div class="panel">
+      <h2 style="font-size:16px;margin:0 0 10px">Summary by stage</h2>
+      <div class="scroll" style="max-height:none"><table id="summary"></table></div>
+      <p style="color:var(--muted);margin:10px 0 0;line-height:1.5">
+        <span class="tag DELETE">Delete</span> not in either sheet, or marked Invalid (W).
+        <span class="tag COMPLETE">Complete</span> sheet says Delivered (C): moved to Dispatched / Completed.
+        <span class="tag MOVE_FINAL">Move to Final</span> FIR ST (AN) is Done but the job is still in a production stage.
+        <span class="tag REVIEW">Review</span> job is past Inspection but pre-inspection (Z) is not Done: check by hand, no automatic change.
+        <span class="tag KEEP">Keep</span> matches the sheet.
+      </p>
+    </div>
+
+    <div class="panel">
+      <div class="row" style="margin-bottom:10px">
+        <label>Stage <select id="f-stage"><option value="">All</option></select></label>
+        <label>Action <select id="f-action">
+          <option value="">All except Keep</option><option>DELETE</option><option>COMPLETE</option>
+          <option>MOVE_FINAL</option><option>REVIEW</option><option>KEEP</option></select></label>
+        <label>KP <input type="text" id="f-kp" placeholder="KP-979" size="10"></label>
+        <button class="secondary" id="btn-tick">Tick shown</button>
+        <button class="secondary" id="btn-untick">Untick shown</button>
+        <button class="secondary" id="btn-csv">Download plan (CSV)</button>
+      </div>
+      <div class="scroll"><table id="plan"></table></div>
+      <div class="row" style="margin-top:12px">
+        <button class="danger" id="btn-apply">Apply selected changes</button>
+        <span id="sel-count" style="color:var(--muted)"></span>
+      </div>
+    </div>
+
+    <div class="panel"><div id="log">Ready.</div></div>
+  </div>
+</main>
+
+<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+<script src="js/firebase-config.js"></script>
+<script>
+(function () {
+  // ---- Sheet sources --------------------------------------------------------
+  // New 26-27 sheet: C delivered, T KP, W valid/invalid, Z pre-insp status, AN FIR ST
+  const NEW_SHEET = { id: "1vZUBWe2c5pNdKTQ808jF8XPeE5j-XOUYwHAsNK0aqB8", label: "26-27",
+                      query: "SELECT T, C, W, Z, AN WHERE T IS NOT NULL" };
+  // Old 25-26 sheet (no valid/invalid column): C delivered, T KP, Y pre-insp status, AM FIR ST
+  const OLD_SHEET = { id: "1ip55xEk5rtdqqhCeJ8Hx0IT6aBfnO_0eFIEKh3a7cYg", label: "25-26",
+                      query: "SELECT T, C, Y, AM WHERE T IS NOT NULL" };
+  const PROD_STAGES = ["Masking", "Spraying", "Grinding", "Polishing"];
+  const STAGE_ORDER = ["Inspection", ...PROD_STAGES, "Final Inspection", "Dispatch"];
+  const ALLOWED_ROLES = ["super_admin", "it_team"];
+
+  const $ = id => document.getElementById(id);
+  const statusEl = $("status");
+  let db, currentUser, plan = [];
+
+  function setStatus(msg, isErr) { statusEl.textContent = msg; statusEl.className = isErr ? "err" : ""; }
+  function log(msg) { const el = $("log"); el.textContent += "\n" + new Date().toLocaleTimeString() + "  " + msg; el.scrollTop = el.scrollHeight; }
+  const norm = v => String(v == null ? "" : v).trim();
+  const lower = v => norm(v).toLowerCase();
+  const baseKp = kp => { const k = norm(kp).toUpperCase(); const i = k.indexOf("-R"); return i === -1 ? k : k.slice(0, i); };
+  const esc = s => norm(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+  // ---- Sheet fetch (GViz JSONP, same method the dashboard uses) --------------
+  function fetchSheet(src) {
+    return new Promise((resolve, reject) => {
+      const cb = "__gviz_" + Math.random().toString(36).slice(2);
+      const script = document.createElement("script");
+      const timer = setTimeout(() => { cleanup(); reject(new Error(src.label + " sheet timed out")); }, 45000);
+      function cleanup() { clearTimeout(timer); delete window[cb]; script.remove(); }
+      window[cb] = resp => {
+        cleanup();
+        if (!resp || resp.status !== "ok") {
+          const e = resp && resp.errors && resp.errors[0];
+          return reject(new Error(src.label + " sheet: " + (e ? (e.detailed_message || e.message) : "unknown error")));
+        }
+        resolve(resp.table.rows.map(r => (r.c || []).map(c => (c && c.v != null) ? String(c.v) : "")));
+      };
+      script.onerror = () => { cleanup(); reject(new Error(src.label + " sheet could not be loaded")); };
+      script.src = `https://docs.google.com/spreadsheets/d/${src.id}/gviz/tq?sheet=FMS&range=A5:AZ20000&headers=0` +
+                   `&tqx=out:json;responseHandler:${cb}&tq=${encodeURIComponent(src.query)}`;
+      document.body.appendChild(script);
+    });
+  }
+
+  function buildSheetMap(rows, label, hasValidity) {
+    const map = new Map();
+    rows.forEach(([kp, delivered, validity, preInsp, firSt]) => {
+      const key = baseKp(kp);
+      if (!/^KP-/.test(key)) return; // skips header rows like "KP no"
+      const rec = { source: label, delivered: lower(delivered) === "delivered",
+                    invalid: hasValidity && lower(validity) === "invalid",
+                    preDone: lower(preInsp) === "done", firDone: lower(firSt) === "done",
+                    rawC: norm(delivered), rawW: hasValidity ? norm(validity) : "", rawZ: norm(preInsp), rawAN: norm(firSt) };
+      const prev = map.get(key);
+      // Same KP on several rows: prefer a valid row over an invalid one, else keep the latest row
+      if (!prev || (prev.invalid && !rec.invalid) || prev.invalid === rec.invalid) map.set(key, rec);
+    });
+    return map;
+  }
+
+  // ---- Decide an action for one job -------------------------------------------
+  function decide(job, rec) {
+    const dept = job.currentDepartment || "";
+    if (!rec) return ["DELETE", "KP not found in the 26-27 or 25-26 sheet"];
+    if (rec.invalid) return ["DELETE", "Marked Invalid in column W"];
+    if (rec.delivered) return ["COMPLETE", "Sheet says Delivered (column C)"];
+    if (dept === "Inspection") {
+      return ["KEEP", rec.preDone ? "Pre-inspection Done: auto-sync will move it out of Inspection" : "Pending pre-inspection"];
+    }
+    if (!rec.preDone) return ["REVIEW", "Past Inspection, but pre-inspection (Z) is not Done in the sheet"];
+    if (rec.firDone && PROD_STAGES.includes(dept)) return ["MOVE_FINAL", "FIR ST (AN) is Done in the sheet"];
+    return ["KEEP", "Matches the sheet"];
+  }
+
+  // ---- Scan ---------------------------------------------------------------------
+  async function scan() {
+    $("btn-scan").disabled = true;
+    try {
+      setStatus("Reading the 26-27 sheet…");
+      const newMap = buildSheetMap(await fetchSheet(NEW_SHEET), NEW_SHEET.label, true);
+      log(`26-27 sheet: ${newMap.size} KP numbers`);
+      let oldMap = new Map();
+      try {
+        setStatus("Reading the old 25-26 sheet…");
+        // Old sheet has no validity column: reshape [T, C, Y, AM] to [T, C, "", Y, AM]
+        const oldRows = (await fetchSheet(OLD_SHEET)).map(r => [r[0], r[1], "", r[2], r[3]]);
+        oldMap = buildSheetMap(oldRows, OLD_SHEET.label, false);
+        log(`25-26 sheet: ${oldMap.size} KP numbers`);
+      } catch (e) { log("Old sheet skipped: " + e.message); }
+
+      setStatus("Reading jobs from Firebase…");
+      const snap = await db.collection("jobs").get();
+      plan = [];
+      snap.forEach(doc => {
+        const j = doc.data();
+        if (j.isDeleted === true) return;
+        const dept = j.currentDepartment || "";
+        if (dept === "Dispatched" || dept === "Completed" || j.status === "Completed" || j.status === "Deleted") return;
+        const key = baseKp(j.kpNumber);
+        const rec = newMap.get(key) || oldMap.get(key) || null;
+        const [action, reason] = j.kpNumber ? decide(j, rec) : ["REVIEW", "Job has no KP number"];
+        plan.push({ docId: doc.id, kp: norm(j.kpNumber), dept, part: norm(j.partName), customer: norm(j.customer),
+                    rec, action, reason, selected: ["DELETE", "COMPLETE", "MOVE_FINAL"].includes(action), raw: j });
+      });
+      plan.sort((a, b) => (STAGE_ORDER.indexOf(a.dept) - STAGE_ORDER.indexOf(b.dept)) || a.kp.localeCompare(b.kp));
+      log(`Firebase: ${plan.length} open jobs checked`);
+      setStatus(`Scan finished: ${plan.length} open jobs. Review the list below.`);
+      renderSummary(); fillStageFilter(); renderPlan();
+      $("results").classList.remove("hidden");
+    } catch (e) {
+      setStatus(e.message, true); log("ERROR: " + e.message);
+    } finally { $("btn-scan").disabled = false; }
+  }
+
+  // ---- Rendering ----------------------------------------------------------------
+  function renderSummary() {
+    const actions = ["DELETE", "COMPLETE", "MOVE_FINAL", "REVIEW", "KEEP"];
+    const stages = [...new Set(plan.map(p => p.dept))].sort((a, b) => STAGE_ORDER.indexOf(a) - STAGE_ORDER.indexOf(b));
+    let h = "<tr><th>Stage</th>" + actions.map(a => `<th class="num">${label(a)}</th>`).join("") + '<th class="num">Total</th></tr>';
+    stages.forEach(s => {
+      const rows = plan.filter(p => p.dept === s);
+      h += `<tr><td>${esc(s || "(none)")}</td>` + actions.map(a => `<td class="num">${rows.filter(p => p.action === a).length || ""}</td>`).join("") +
+           `<td class="num"><strong>${rows.length}</strong></td></tr>`;
+    });
+    $("summary").innerHTML = h;
+  }
+  function label(a) { return { DELETE: "Delete", COMPLETE: "Complete", MOVE_FINAL: "Move to Final", REVIEW: "Review", KEEP: "Keep" }[a]; }
+  function fillStageFilter() {
+    const sel = $("f-stage"); sel.length = 1;
+    [...new Set(plan.map(p => p.dept))].sort((a, b) => STAGE_ORDER.indexOf(a) - STAGE_ORDER.indexOf(b))
+      .forEach(s => sel.add(new Option(s || "(none)", s)));
+  }
+  function visibleRows() {
+    const st = $("f-stage").value, ac = $("f-action").value, kp = $("f-kp").value.trim().toUpperCase();
+    return plan.filter(p => (!st || p.dept === st) && (ac ? p.action === ac : p.action !== "KEEP") && (!kp || p.kp.toUpperCase().includes(kp)));
+  }
+  function renderPlan() {
+    const rows = visibleRows();
+    let h = "<tr><th></th><th>KP</th><th>Stage now</th><th>Part</th><th>Customer</th><th>Sheet C / W / Z / AN</th><th>Proposed</th><th>Why</th></tr>";
+    rows.forEach(p => {
+      const i = plan.indexOf(p);
+      const actionable = ["DELETE", "COMPLETE", "MOVE_FINAL"].includes(p.action);
+      const r = p.rec;
+      const sheet = r ? `${esc(r.source)}: ${esc(r.rawC) || "–"} / ${esc(r.rawW) || "–"} / ${esc(r.rawZ) || "–"} / ${esc(r.rawAN) || "–"}` : "not found";
+      h += `<tr><td>${actionable ? `<input type="checkbox" data-i="${i}" ${p.selected ? "checked" : ""} aria-label="Select ${esc(p.kp)}">` : ""}</td>
+            <td><strong>${esc(p.kp)}</strong></td><td>${esc(p.dept)}</td><td>${esc(p.part)}</td><td>${esc(p.customer)}</td>
+            <td>${sheet}</td><td><span class="tag ${p.action}">${label(p.action)}</span></td><td>${esc(p.reason)}</td></tr>`;
+    });
+    if (!rows.length) h += '<tr><td colspan="8" style="color:var(--muted)">No jobs match these filters.</td></tr>';
+    $("plan").innerHTML = h;
+    updateCount();
+  }
+  function updateCount() {
+    const sel = plan.filter(p => p.selected);
+    const by = a => sel.filter(p => p.action === a).length;
+    $("sel-count").textContent = `${sel.length} selected: ${by("DELETE")} delete, ${by("COMPLETE")} complete, ${by("MOVE_FINAL")} move to Final Inspection`;
+    $("btn-apply").disabled = sel.length === 0;
+  }
+  function setVisible(val) {
+    visibleRows().forEach(p => { if (["DELETE", "COMPLETE", "MOVE_FINAL"].includes(p.action)) p.selected = val; });
+    renderPlan();
+  }
+
+  // ---- Export / backup ------------------------------------------------------------
+  function download(name, text, type) {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([text], { type }));
+    a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  }
+  function stamp() { return new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19); }
+  function exportCsv() {
+    const q = v => `"${norm(v).replace(/"/g, '""')}"`;
+    const lines = [["Selected", "KP", "Stage", "Part", "Customer", "Sheet", "C", "W", "Z", "AN", "Action", "Reason"].join(",")];
+    plan.forEach(p => { const r = p.rec || {};
+      lines.push([p.selected ? "yes" : "", p.kp, p.dept, p.part, p.customer, r.source || "not found", r.rawC, r.rawW, r.rawZ, r.rawAN, label(p.action), p.reason].map(q).join(",")); });
+    download(`job-cleanup-plan-${stamp()}.csv`, lines.join("\r\n"), "text/csv");
+  }
+
+  // ---- Apply ----------------------------------------------------------------------
+  async function apply() {
+    const sel = plan.filter(p => p.selected);
+    if (!sel.length) return;
+    const answer = prompt(`This will change ${sel.length} jobs in Firebase.\nA backup file downloads first.\n\nType APPLY to continue.`);
+    if (answer !== "APPLY") { log("Apply cancelled."); return; }
+
+    // Backup of the exact documents that will change
+    download(`job-cleanup-backup-${stamp()}.json`,
+             JSON.stringify(sel.map(p => ({ docId: p.docId, action: p.action, reason: p.reason, before: p.raw })), null, 2), "application/json");
+    log(`Backup downloaded (${sel.length} jobs).`);
+
+    $("btn-apply").disabled = true; $("btn-scan").disabled = true;
+    const ts = firebase.firestore.FieldValue.serverTimestamp();
+    const note = `Cleanup ${new Date().toISOString().slice(0, 10)} by ${currentUser.email}`;
+    let done = 0, failed = 0;
+    for (let i = 0; i < sel.length; i += 400) {
+      const chunk = sel.slice(i, i + 400);
+      const batch = db.batch();
+      chunk.forEach(p => {
+        const ref = db.collection("jobs").doc(p.docId);
+        if (p.action === "DELETE") batch.update(ref, { isDeleted: true, status: "Deleted", lastUpdated: ts, cleanupNote: note + ": " + p.reason });
+        if (p.action === "COMPLETE") batch.update(ref, { currentDepartment: "Dispatched", status: "Completed", lastUpdated: ts, cleanupNote: note + ": " + p.reason });
+        if (p.action === "MOVE_FINAL") batch.update(ref, { currentDepartment: "Final Inspection", status: "Pending", "finalInspection.status": "Pending", lastUpdated: ts, cleanupNote: note + ": " + p.reason });
+      });
+      try { await batch.commit(); done += chunk.length; log(`Saved ${done} / ${sel.length}`); }
+      catch (e) { failed += chunk.length; log(`ERROR saving jobs ${i + 1}–${i + chunk.length}: ${e.message}`); }
+    }
+    try {
+      await db.collection("audit_logs").add({ timestamp: ts, userId: currentUser.uid, userEmail: currentUser.email, role: currentUser.role,
+        department: "System", kpNumber: "N/A", action: "Job cleanup",
+        details: `Cleanup applied: ${sel.filter(p => p.action === "DELETE").length} deleted, ${sel.filter(p => p.action === "COMPLETE").length} completed, ` +
+                 `${sel.filter(p => p.action === "MOVE_FINAL").length} moved to Final Inspection. Failed: ${failed}.` });
+    } catch (e) { log("Audit log not written: " + e.message); }
+    setStatus(failed ? `Finished with errors: ${done} saved, ${failed} failed. See the log.` : `Done: ${done} jobs updated. Run the scan again to confirm.`, failed > 0);
+    $("btn-scan").disabled = false;
+    plan = []; $("plan").innerHTML = ""; $("summary").innerHTML = ""; updateCount();
+  }
+
+  // ---- Login gate -----------------------------------------------------------------
+  firebase.initializeApp(firebaseConfig);
+  db = firebase.firestore();
+  firebase.auth().onAuthStateChanged(async user => {
+    if (!user || user.isAnonymous) {
+      setStatus("Not logged in. Log in to the dashboard as super admin in this browser, then reopen this page.", true); return;
+    }
+    try {
+      const prof = await db.collection("users").doc(user.uid).get();
+      const role = prof.exists ? prof.data().role : "";
+      if (!ALLOWED_ROLES.includes(role) || (prof.exists && prof.data().active !== true)) {
+        setStatus(`Logged in as ${user.email} (${role || "no role"}). Only an active super admin can use this page.`, true); return;
+      }
+      currentUser = { uid: user.uid, email: user.email, role };
+      setStatus(`Logged in as ${user.email} (super admin). Click Scan jobs to start. Nothing changes until you apply.`);
+      $("btn-scan").disabled = false;
+    } catch (e) { setStatus("Could not check your role: " + e.message, true); }
+  });
+
+  $("btn-scan").onclick = scan;
+  $("btn-apply").onclick = apply;
+  $("btn-csv").onclick = exportCsv;
+  $("btn-tick").onclick = () => setVisible(true);
+  $("btn-untick").onclick = () => setVisible(false);
+  ["f-stage", "f-action"].forEach(id => $(id).onchange = renderPlan);
+  $("f-kp").oninput = renderPlan;
+  $("plan").addEventListener("change", e => {
+    const i = e.target.dataset && e.target.dataset.i;
+    if (i != null) { plan[+i].selected = e.target.checked; updateCount(); }
+  });
+})();
+</script>
+</body>
+</html>
