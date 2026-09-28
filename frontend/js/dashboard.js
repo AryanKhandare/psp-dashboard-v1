@@ -1488,21 +1488,21 @@ async function saveAndApproveUser(uid) {
   const department = deptSelect.value;
 
   const isMock = !firebaseConfig.apiKey || firebaseConfig.apiKey.includes("YOUR_FIREBASE_") || localStorage.getItem("psp_auth_mock") === "true";
-  let users = [];
+  let userList = [];
   
   if (!isMock) {
     try {
       const db = firebase.firestore();
       const snapshot = await db.collection("users").get();
-      snapshot.forEach(doc => users.push(doc.data()));
+      snapshot.forEach(doc => userList.push(doc.data()));
     } catch (e) {
-      users = MOCK_DB.getUsers();
+      userList = MOCK_DB.getUsers();
     }
   } else {
-    users = MOCK_DB.getUsers();
+    userList = MOCK_DB.getUsers();
   }
 
-  const user = users.find(u => u.uid === uid);
+  const user = userList.find(u => u.uid === uid);
   if (!user) {
     alert("User not found.");
     return;
@@ -1510,10 +1510,21 @@ async function saveAndApproveUser(uid) {
 
   // Check super admin singleton constraint
   if (role === 'super_admin') {
-    const hasSuper = users.some(u => u.role === 'super_admin' && u.uid !== uid);
+    const hasSuper = userList.some(u => u.role === 'super_admin' && u.uid !== uid);
     if (hasSuper) {
       alert("Super Admin account already exists.");
       return;
+    }
+  }
+
+  // Update in global in-memory users array lively
+  if (typeof users !== 'undefined' && Array.isArray(users)) {
+    const memUser = users.find(u => u.uid === uid);
+    if (memUser) {
+      memUser.role = role;
+      memUser.department = department;
+      memUser.active = true;
+      memUser.emailVerified = true;
     }
   }
 
@@ -1549,21 +1560,35 @@ async function saveAndApproveUser(uid) {
   // Audit log
   createAuditLog(currentUser.email, null, `Approved & assigned role ${role.toUpperCase()} and department ${department} to user ${user.email}`);
 
+  renderUserManagement();
   renderAll();
 }
 
 async function toggleUserStatus(uid) {
-  const users = MOCK_DB.getUsers();
-  const user = users.find(u => u.uid === uid);
+  const isMock = isMockMode();
+  let userList = isMock ? MOCK_DB.getUsers() : users;
+  const user = userList.find(u => u.uid === uid);
   if (user) {
     user.active = !user.active;
-    MOCK_DB.saveUsers(users);
+    
+    // Update global users in memory
+    if (typeof users !== 'undefined' && Array.isArray(users)) {
+      const memUser = users.find(u => u.uid === uid);
+      if (memUser) memUser.active = user.active;
+    }
+
+    if (isMock) {
+      const mockUsers = MOCK_DB.getUsers();
+      const mockUser = mockUsers.find(u => u.uid === uid);
+      if (mockUser) {
+        mockUser.active = user.active;
+        MOCK_DB.saveUsers(mockUsers);
+      }
+    }
     
     // Audit log
     createAuditLog(currentUser.email, null, `Changed status of user '${user.email}' to ${user.active ? 'Enabled' : 'Disabled'}`);
     
-    // If we are in live firebase mode, sync user status
-    const isMock = !firebaseConfig.apiKey || firebaseConfig.apiKey.includes("YOUR_FIREBASE_") || localStorage.getItem("psp_auth_mock") === "true";
     if (!isMock) {
       try {
         const db = firebase.firestore();
@@ -1574,6 +1599,7 @@ async function toggleUserStatus(uid) {
       }
     }
     
+    renderUserManagement();
     renderAll();
   }
 }
@@ -2053,12 +2079,17 @@ function setupEventListeners() {
   if (userForm) {
     userForm.addEventListener("submit", async (e) => {
       e.preventDefault();
+      const fullname = document.getElementById("user-fullname") ? document.getElementById("user-fullname").value.trim() : "";
       const email = document.getElementById("user-email").value.trim();
       const password = document.getElementById("user-password").value;
       const confirmPass = document.getElementById("user-confirm-password").value;
       const role = document.getElementById("user-role").value;
       const department = document.getElementById("user-dept").value;
       
+      if (!fullname) {
+        alert("Full Name / Operator Name is required.");
+        return;
+      }
       if (password !== confirmPass) {
         alert("Security PINs do not match.");
         return;
@@ -2096,11 +2127,14 @@ function setupEventListeners() {
 
       const newUser = {
         uid: newUid,
+        name: fullname,
         email,
         role,
         department: role === 'super_admin' ? 'All' : department,
         active: true,
-        pin: password
+        emailVerified: true,
+        pin: password,
+        createdAt: new Date().toISOString()
       };
       
       MOCK_DB.addUser(newUser, password);
@@ -2108,25 +2142,44 @@ function setupEventListeners() {
       if (!isMock) {
         try {
           const db = firebase.firestore();
-          await db.collection("users").doc(newUid).set({
-            uid: newUid,
-            name: email.split('@')[0],
-            email,
-            role,
-            department: newUser.department,
-            active: true,
-            emailVerified: true,
-            pin: password,
-            createdAt: new Date().toISOString()
-          });
+          await db.collection("users").doc(newUid).set(newUser);
+          
+          // Live update global in-memory users array immediately
+          const existingIdx = users.findIndex(u => u.email.toLowerCase() === email.toLowerCase());
+          if (existingIdx >= 0) {
+            users[existingIdx] = newUser;
+          } else {
+            users.unshift(newUser);
+          }
+          try {
+            localStorage.setItem("psp_cached_users", JSON.stringify(users));
+          } catch (e) {}
+
+          // If operator, update operators list lively
+          if (role === 'operator') {
+            operators.push({
+              id: newUid,
+              name: fullname,
+              shift: "A Shift",
+              jobsAssigned: 0,
+              jobsCompleted: 0,
+              activeTimeMs: 0
+            });
+            try {
+              localStorage.setItem("psp_cached_operators", JSON.stringify(operators));
+            } catch (e) {}
+          }
         } catch (err) {
           console.error("Firestore user creation sync error:", err);
           handleFirestoreError("user-creation-write", err);
+          alert("Failed to save user to Firestore: " + err.message);
+          return;
         }
       }
       
-      createAuditLog(currentUser.email, null, `Created access profile for user: ${email} (${role.toUpperCase()})`);
+      createAuditLog(currentUser.email, null, `Created access profile for user: ${fullname} (${email}) - Role: ${role.toUpperCase()}, Dept: ${newUser.department}`);
       userForm.reset();
+      renderUserManagement();
       renderAll();
       alert("User profile provisioned successfully.");
     });
