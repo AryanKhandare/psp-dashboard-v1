@@ -152,7 +152,7 @@
 
   // ---- Decide an action for one job -------------------------------------------
   function decide(job, rec) {
-    const dept = job.currentDepartment || "";
+    const dept = job.currentStage || "Inspection";
     if (!rec) return ["DELETE", "KP not found in the 26-27 or 25-26 sheet"];
     if (rec.invalid) return ["DELETE", "Marked Invalid in column W"];
     if (rec.delivered) return ["COMPLETE", "Sheet says Delivered (column C)"];
@@ -186,8 +186,9 @@
       snap.forEach(doc => {
         const j = doc.data();
         if (j.isDeleted === true) return;
-        const dept = j.currentDepartment || "";
-        if (dept === "Dispatched" || dept === "Completed" || j.status === "Completed" || j.status === "Deleted") return;
+        // The live dashboard stores the stage in "currentStage" and the status in "currentStatus"
+        const dept = j.currentStage || "Inspection";
+        if (dept === "Dispatched" || dept === "Completed" || j.currentStatus === "Deleted" || j.status === "Deleted") return;
         const key = baseKp(j.kpNumber);
         const rec = newMap.get(key) || oldMap.get(key) || null;
         const [action, reason] = j.kpNumber ? decide(j, rec) : ["REVIEW", "Job has no KP number"];
@@ -289,9 +290,9 @@
       const batch = db.batch();
       chunk.forEach(p => {
         const ref = db.collection("jobs").doc(p.docId);
-        if (p.action === "DELETE") batch.update(ref, { isDeleted: true, status: "Deleted", lastUpdated: ts, cleanupNote: note + ": " + p.reason });
-        if (p.action === "COMPLETE") batch.update(ref, { currentDepartment: "Dispatched", status: "Completed", lastUpdated: ts, cleanupNote: note + ": " + p.reason });
-        if (p.action === "MOVE_FINAL") batch.update(ref, { currentDepartment: "Final Inspection", status: "Pending", "finalInspection.status": "Pending", lastUpdated: ts, cleanupNote: note + ": " + p.reason });
+        if (p.action === "DELETE") batch.update(ref, { isDeleted: true, status: "Deleted", currentStatus: "Deleted", lastUpdated: ts, cleanupNote: note + ": " + p.reason });
+        if (p.action === "COMPLETE") batch.update(ref, { currentStage: "Dispatched", currentStatus: "Completed", lastUpdated: ts, cleanupNote: note + ": " + p.reason });
+        if (p.action === "MOVE_FINAL") batch.update(ref, { currentStage: "Final Inspection", currentStatus: "Pending", "finalInspection.status": "Pending", lastUpdated: ts, cleanupNote: note + ": " + p.reason });
       });
       try { await batch.commit(); done += chunk.length; log(`Saved ${done} / ${sel.length}`); }
       catch (e) { failed += chunk.length; log(`ERROR saving jobs ${i + 1}–${i + chunk.length}: ${e.message}`); }
