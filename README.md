@@ -75,9 +75,9 @@ Or start directly via Python:
 python -m http.server 3000
 ```
 
-* **Login Screen:** [http://localhost:3000/frontend/login.html](http://localhost:3000/frontend/login.html)
-* **Main Dashboard:** [http://localhost:3000/frontend/index.html](http://localhost:3000/frontend/index.html)
-*(Root URL [http://localhost:3000/](http://localhost:3000/) automatically redirects to `frontend/index.html`)*
+* **Login Screen:** [http://localhost:3000/login.html](http://localhost:3000/login.html)
+* **Main Dashboard:** [http://localhost:3000/](http://localhost:3000/)
+*(Directly serves the MES dashboard, or redirects unauthenticated users to login)*
 
 ---
 
