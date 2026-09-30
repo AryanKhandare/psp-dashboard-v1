@@ -1,0 +1,12 @@
+{
+  "cleanUrls": false,
+  "rewrites": [
+    { "source": "/frontend/index.html", "destination": "/index.html" },
+    { "source": "/frontend/login.html", "destination": "/login.html" },
+    { "source": "/frontend/spraying.html", "destination": "/spraying.html" },
+    { "source": "/frontend", "destination": "/index.html" },
+    { "source": "/frontend/css/:path*", "destination": "/css/:path*" },
+    { "source": "/frontend/js/:path*", "destination": "/js/:path*" },
+    { "source": "/frontend/:path*", "destination": "/:path*" }
+  ]
+}

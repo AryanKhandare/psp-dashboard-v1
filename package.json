@@ -3,8 +3,8 @@
   "version": "1.0.0",
   "description": "PSP MES Dashboard",
   "scripts": {
-    "dev": "npx --yes serve -l 3000 .",
-    "start": "npx --yes serve -l 3000 ."
+    "dev": "npx --yes serve -l 3000",
+    "start": "npx --yes serve -l 3000"
   },
   "keywords": [],
   "author": "",
