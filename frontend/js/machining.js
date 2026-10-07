@@ -790,8 +790,8 @@
         const st = stageStatus(job, c.stage);
         const badge = st === "In Progress" ? "background:#3b82f6;" : (st === "Hold" ? "background:#ef4444;" : "background:#f97316;");
         const action = c.stage === "Inspection"
-          ? (ro ? "" : `<button class="btn btn-success btn-xs" style="width:100%; height:28px; font-size:10px; font-weight:700;" data-board-push="${esc(job.kpNumber)}">🚀 Approve &amp; Push Job</button>`)
-          : `<button class="btn btn-secondary btn-xs" style="width:100%; height:28px; font-size:10px;" data-board-open="${c.tab}">Open ${esc(c.stage)} →</button>`;
+          ? (ro ? "" : `<button class="btn btn-secondary btn-xs" style="width:100%; height:28px; font-size:10px;" data-board-push="${esc(job.kpNumber)}">→ Move to Next Stage</button>`)
+          : `<button class="btn btn-secondary btn-xs" style="width:100%; height:28px; font-size:10px;" data-board-open="${c.tab}">→ Open ${esc(c.stage)} Stage</button>`;
         return `<div class="kanban-card">
             <div class="kanban-card-header">
               <span class="kanban-card-kp">${esc(kpLabel(job))}</span>
