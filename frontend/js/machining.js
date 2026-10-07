@@ -20,7 +20,7 @@
   const STAGE_ORDER = ["Inspection", "Machining", "Masking", "Spraying", "Grinding", "Polishing",
                        "Final Inspection", "Dispatch", "Dispatched", "Completed"];
 
-  const MODULE_VERSION = 12;
+  const MODULE_VERSION = 13;
   let selectedKp = null;
   let boardDragging = false; // pause board redraws while a card is being dragged
   let activeSubtab = "machining-subtab-queue";
@@ -988,6 +988,23 @@
     return "";
   }
 
+  // Returns the Firebase data of a job with this KP that is NOT deleted, or null
+  async function findActiveJob(kpNo) {
+    const kp = String(kpNo || "").trim();
+    if (!kp) return null;
+    try {
+      const db = firebase.firestore();
+      const byId = await db.collection("jobs").doc(`job_${kp}`).get();
+      if (byId.exists && byId.data().isDeleted !== true) return byId.data();
+      const byKp = await db.collection("jobs").where("kpNumber", "==", kp).get();
+      const live = byKp.docs.find(d => d.data().isDeleted !== true);
+      return live ? live.data() : null;
+    } catch (e) {
+      console.warn("[Machining] Could not check active job for", kp, e && e.message ? e.message : e);
+      return null;
+    }
+  }
+
   // Auto-sync adds the job to the screen before saving; remove it again when the save is skipped
   function dropLocalPhantom(kp) {
     const list = allJobs();
@@ -1102,6 +1119,23 @@
           return saveMoveStage(payload);
         }
         if (type === "CREATEJOB" && !(typeof isMockMode === "function" && isMockMode())) {
+          // REGISTER CARD sends no target stage; the sheet auto-sync always does
+          const isManualRegister = !Object.prototype.hasOwnProperty.call(payload, "currentDepartment");
+          if (isManualRegister) {
+            const active = await findActiveJob(payload.kpNo);
+            if (active) {
+              dropLocalPhantom(payload.kpNo);
+              alert(`${payload.kpNo} is already active in ${active.currentStage || "a stage"}. It was not registered again.`);
+              return { success: true, skipped: "already active" };
+            }
+            // A previously deleted KP may be registered again on purpose: allow it and unblock it
+            const k = String(payload.kpNo || "").trim();
+            blockedCreates.delete(k);
+            if (window.deletedJobs && window.deletedJobs.delete) window.deletedJobs.delete(k.toLowerCase());
+            try { localStorage.setItem("psp_deleted_jobs", JSON.stringify(Array.from(window.deletedJobs || []))); } catch (e) {}
+            console.log(`[Machining] Register Card: ${k} registered in Inspection.`);
+            return origSend.apply(this, arguments);
+          }
           const blocked = await shouldBlockCreate(payload);
           if (blocked) {
             dropLocalPhantom(payload.kpNo);
