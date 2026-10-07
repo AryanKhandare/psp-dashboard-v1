@@ -20,7 +20,9 @@
   const STAGE_ORDER = ["Inspection", "Machining", "Masking", "Spraying", "Grinding", "Polishing",
                        "Final Inspection", "Dispatch", "Dispatched", "Completed"];
 
+  const MODULE_VERSION = 9;
   let selectedKp = null;
+  let boardDragging = false; // pause board redraws while a card is being dragged
   let activeSubtab = "machining-subtab-queue";
 
   const $ = id => document.getElementById(id);
@@ -767,6 +769,7 @@
     board.addEventListener("dragstart", e => {
       const card = e.target.closest && e.target.closest("[data-board-kp]");
       if (!card) return;
+      boardDragging = true;
       e.dataTransfer.setData("text/plain", card.getAttribute("data-board-kp"));
       e.dataTransfer.effectAllowed = "move";
       card.classList.add("dragging");
@@ -775,13 +778,14 @@
       const card = e.target.closest && e.target.closest("[data-board-kp]");
       if (card) card.classList.remove("dragging");
       board.querySelectorAll(".drag-over").forEach(el => el.classList.remove("drag-over"));
+      boardDragging = false;
+      setTimeout(() => { try { renderStageBoard(); } catch (err) {} }, 50);
     });
     BOARD_COLUMNS.forEach(c => {
       const box = $(c.cards);
       if (!box) return;
       const column = box.closest(".kanban-column");
       column.addEventListener("dragover", e => {
-        if (c.stage === "Inspection") return;
         e.preventDefault();
         e.dataTransfer.dropEffect = "move";
         box.classList.add("drag-over");
@@ -792,10 +796,13 @@
       column.addEventListener("drop", e => {
         e.preventDefault();
         box.classList.remove("drag-over");
-        if (c.stage === "Inspection") return;
+        boardDragging = false;
         const kp = e.dataTransfer.getData("text/plain");
+        console.log("[Machining] Board drop:", kp, "→", c.stage);
         const job = kp && allJobs().find(j => j.kpNumber === kp);
-        if (job && job.currentDepartment === "Inspection") pushFromInspection(job, c.stage);
+        if (!job || job.currentDepartment === c.stage) return;
+        if (job.currentDepartment === "Inspection") pushFromInspection(job, c.stage);
+        else moveJobOnBoard(job, c.stage);
       });
     });
 
@@ -828,13 +835,86 @@
     applyStageTransitionWithUndo(targetStage);
   }
 
+  // Field name of each stage's data on the job ("Final Inspection" is stored as finalInspection)
+  const stageKeyOf = stage => {
+    const k = String(stage || "").toLowerCase().replace(/[^a-z]/g, "");
+    return k === "finalinspection" ? "finalInspection" : k;
+  };
+
+  // Move a job from any stage to any other stage (forward or backward) from the board
+  function moveJobOnBoard(job, targetStage) {
+    if (typeof applyStageTransitionWithUndo !== "function") return;
+    const fromStage = job.currentDepartment;
+    const fromKey = stageKeyOf(fromStage);
+    const fromData = job[fromKey] || {};
+    const running = fromData.status === "In Progress" || fromData.status === "Hold";
+    if (running && !confirm(`${job.kpNumber} is currently ${fromData.status} in ${fromStage}.\nMoving it will stop that cycle.\n\nMove to ${targetStage} anyway?`)) return;
+
+    const operator = (typeof getLoggedUser === "function" && getLoggedUser() && getLoggedUser().name) || ((user() && user().email) || "Supervisor");
+    window.pendingTransition = {
+      job: job,
+      stage: fromStage,
+      payloadGenerator: nextStage => ({
+        type: "MOVE_STAGE", kpNo: job.kpNumber, stage: fromStage, nextStage: nextStage,
+        operatorName: operator, stopRunningCycle: running, time: new Date().toISOString()
+      }),
+      applyLocalMutation: nextStage => {
+        if (running && job[fromKey]) { job[fromKey].status = "Pending"; job[fromKey].lastStartedAt = null; }
+        if (typeof transitionToStage === "function") transitionToStage(job, nextStage, operator);
+        else { job.currentDepartment = nextStage; job.status = "Pending"; }
+        if (selectedKp === job.kpNumber) selectedKp = null;
+      }
+    };
+    applyStageTransitionWithUndo(targetStage);
+  }
+
+  // Firebase save for MOVE_STAGE (the app's own save function has no "move anywhere" step)
+  async function saveMoveStage(payload) {
+    const db = firebase.firestore();
+    const snap = await db.collection("jobs").where("kpNumber", "==", payload.kpNo).get();
+    if (snap.empty) throw new Error(`Job ${payload.kpNo} not found`);
+    const ref = snap.docs[0].ref;
+    const data = snap.docs[0].data();
+    const nowIso = new Date().toISOString();
+    const target = payload.nextStage;
+    const tKey = stageKeyOf(target);
+    const fKey = stageKeyOf(payload.stage);
+
+    const targetData = Object.assign({}, data[tKey] || {}, {
+      status: target === "Dispatched" ? "Completed" : "Pending",
+      queueEntryTime: nowIso, lastStartedAt: null, startTime: null, endTime: null,
+      activeTimeMs: 0, holdHistory: []
+    });
+    if (tKey === "masking" && !Array.isArray(targetData.materials)) targetData.materials = [];
+
+    const updates = {
+      currentStage: target,
+      currentStatus: target === "Dispatched" ? "Completed" : "Pending",
+      assignedOperator: null,
+      shift: "",
+      splitRemark: "",
+      lastUpdated: firebase.firestore.FieldValue.serverTimestamp(),
+      [tKey]: targetData,
+      [`stageAssignedAt.${String(target).toLowerCase().replace(/[^a-z]/g, "")}`]: nowIso
+    };
+    if (payload.stopRunningCycle && fKey && fKey !== tKey && data[fKey]) {
+      updates[fKey] = Object.assign({}, data[fKey], { status: "Pending", lastStartedAt: null });
+    }
+    if (payload.reworkReasonCategory) {
+      updates.lastRework = { from: payload.stage, to: target, reason: payload.reworkReasonCategory,
+                             comments: payload.reworkReasonComments || "", by: payload.operatorName || "", time: nowIso };
+    }
+    await ref.update(updates);
+    return { success: true };
+  }
+
   function stageStatus(job, stage) {
     const key = stage.toLowerCase().replace(/[^a-z]/g, "");
     return (job[key] && job[key].status) || job.status || "Pending";
   }
 
   function renderStageBoard() {
-    if (!$("cards-machining-stage")) return;
+    if (!$("cards-machining-stage") || boardDragging) return;
     const ro = isReadOnly();
     BOARD_COLUMNS.forEach(c => {
       const box = $(c.cards);
@@ -849,7 +929,7 @@
         const action = c.stage === "Inspection"
           ? (ro ? "" : `<button class="btn btn-secondary btn-xs" style="width:100%; height:28px; font-size:10px;" data-board-push="${esc(job.kpNumber)}">→ Move to Next Stage</button>`)
           : `<button class="btn btn-secondary btn-xs" style="width:100%; height:28px; font-size:10px;" data-board-open="${c.tab}">→ Open ${esc(c.stage)} Stage</button>`;
-        const draggable = c.stage === "Inspection" && !ro;
+        const draggable = !ro;
         return `<div class="kanban-card" ${draggable ? `draggable="true" data-board-kp="${esc(job.kpNumber)}" style="cursor:grab;"` : ""}>
             <div class="kanban-card-header">
               <span class="kanban-card-kp">${esc(kpLabel(job))}</span>
@@ -918,6 +998,18 @@
                             activeTimeMs: 0, durationMs: 0, holdHistory: [], remarks: "" };
         }
         return r;
+      };
+    }
+
+    // Handle MOVE_STAGE saves; every other save goes to the app's normal save function
+    if (typeof window.sendBackendPost === "function") {
+      const origSend = window.sendBackendPost;
+      window.sendBackendPost = async function (payload) {
+        if (payload && String(payload.type || "").toUpperCase() === "MOVE_STAGE") {
+          if (typeof isMockMode === "function" && isMockMode()) return { success: true };
+          return saveMoveStage(payload);
+        }
+        return origSend.apply(this, arguments);
       };
     }
 
@@ -1005,7 +1097,7 @@
     setupStageBoard();
     installHooks();
     bindEvents();
-    console.log("[Machining] Department module loaded.");
+    console.log("[Machining] Department module v" + MODULE_VERSION + " loaded.");
   } catch (err) {
     console.error("[Machining] Failed to load module:", err);
   }
