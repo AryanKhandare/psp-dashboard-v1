@@ -1,4 +1,3 @@
-
 function renderGrindingKpis() {
   const pending = jobs.filter(j => j.currentDepartment === "Grinding" && j.grinding?.status === "Pending").length;
   const running = jobs.filter(j => j.currentDepartment === "Grinding" && j.grinding?.status === "In Progress").length;
@@ -321,7 +320,7 @@ function openStartGrindingModal(kpNumber) {
   document.getElementById("grinding-machine-select").value = "";
   document.getElementById("grinding-process-select").value = "Pre Grinding";
   document.getElementById("grinding-qty-input").value = job.quantity;
-  document.getElementById("grinding-location-select").value = "C20";
+  document.getElementById("grinding-location-select").value = "C-20/4";
 
   document.getElementById("modal-start-grinding").classList.add("active");
 }
