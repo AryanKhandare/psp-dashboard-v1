@@ -142,6 +142,7 @@ function startFirestoreListeners() {
           qtyHistory: data.qtyHistory || [],
           splitRemark: data.splitRemark || "",
           inspection: data.inspection || { status: "Pending" },
+          machining: data.machining || { status: "Pending", holdHistory: [] },
           masking: data.masking || { status: "Pending", materials: [], holdHistory: [] },
           spraying: data.spraying || { status: "Pending" },
           grinding: data.grinding || { status: "Pending", holdHistory: [] },

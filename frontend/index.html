@@ -398,7 +398,7 @@
             <!-- Column 1: INSPECTION -->
             <div class="kanban-column" data-status="Intake">
               <div class="kanban-column-header border-blue">
-                <span class="column-title">INSPECTION</span>
+                <span class="column-title">INTAKE</span>
                 <span class="column-count" id="count-intake">0</span>
               </div>
               <div class="kanban-cards-container" id="cards-intake" ondragover="event.preventDefault(); this.classList.add('drag-over');" ondragleave="this.classList.remove('drag-over');" ondrop="handleInspectionKanbanDrop(event, 'Intake'); this.classList.remove('drag-over');">
@@ -409,7 +409,7 @@
             <!-- Column 2: MASKING -->
             <div class="kanban-column" data-status="Visual">
               <div class="kanban-column-header border-orange">
-                <span class="column-title">MASKING</span>
+                <span class="column-title">VISUAL CHECK</span>
                 <span class="column-count" id="count-visual">0</span>
               </div>
               <div class="kanban-cards-container" id="cards-visual" ondragover="event.preventDefault(); this.classList.add('drag-over');" ondragleave="this.classList.remove('drag-over');" ondrop="handleInspectionKanbanDrop(event, 'Visual'); this.classList.remove('drag-over');">
@@ -420,7 +420,7 @@
             <!-- Column 3: SPRAYING -->
             <div class="kanban-column" data-status="Dimensional">
               <div class="kanban-column-header border-purple">
-                <span class="column-title">SPRAYING</span>
+                <span class="column-title">DIMENSIONAL CHECK</span>
                 <span class="column-count" id="count-dimensional">0</span>
               </div>
               <div class="kanban-cards-container" id="cards-dimensional" ondragover="event.preventDefault(); this.classList.add('drag-over');" ondragleave="this.classList.remove('drag-over');" ondrop="handleInspectionKanbanDrop(event, 'Dimensional'); this.classList.remove('drag-over');">
@@ -431,7 +431,7 @@
             <!-- Column 4: GRINDING -->
             <div class="kanban-column" data-status="Review">
               <div class="kanban-column-header border-yellow">
-                <span class="column-title">GRINDING</span>
+                <span class="column-title">REVIEW</span>
                 <span class="column-count" id="count-review">0</span>
               </div>
               <div class="kanban-cards-container" id="cards-review" ondragover="event.preventDefault(); this.classList.add('drag-over');" ondragleave="this.classList.remove('drag-over');" ondrop="handleInspectionKanbanDrop(event, 'Review'); this.classList.remove('drag-over');">
@@ -442,7 +442,7 @@
             <!-- Column 5: POLISHING -->
             <div class="kanban-column" data-status="Ready">
               <div class="kanban-column-header border-green">
-                <span class="column-title">POLISHING</span>
+                <span class="column-title">READY → MASKING / MACHINING</span>
                 <span class="column-count" id="count-ready">0</span>
               </div>
               <div class="kanban-cards-container" id="cards-ready" ondragover="event.preventDefault(); this.classList.add('drag-over');" ondragleave="this.classList.remove('drag-over');" ondrop="handleInspectionKanbanDrop(event, 'Ready'); this.classList.remove('drag-over');">
@@ -2710,7 +2710,7 @@
   <script src="js/state.js"></script>
   <script src="js/utils.js"></script>
   <script src="js/timer.js"></script>
-  <script src="js/firestore-service.js"></script>
+  <script src="js/firestore-service.js?v=2"></script>
   <script src="js/google-sheet-service.js"></script>
   <script src="js/render.js"></script>
   <script src="js/inspection.js"></script>
@@ -2719,6 +2719,7 @@
   <script src="js/grinding.js"></script>
   <script src="js/dashboard.js"></script>
   <script src="js/mes-stage-sync.js?v=2"></script>
+  <script src="js/machining.js?v=1"></script>
   <script src="js/app.js"></script>
 </body>
 </html>
