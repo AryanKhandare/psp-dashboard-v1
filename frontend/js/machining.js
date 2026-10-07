@@ -20,7 +20,7 @@
   const STAGE_ORDER = ["Inspection", "Machining", "Masking", "Spraying", "Grinding", "Polishing",
                        "Final Inspection", "Dispatch", "Dispatched", "Completed"];
 
-  const MODULE_VERSION = 10;
+  const MODULE_VERSION = 11;
   let selectedKp = null;
   let boardDragging = false; // pause board redraws while a card is being dragged
   let activeSubtab = "machining-subtab-queue";
@@ -59,11 +59,16 @@
     });
   }
 
+  // Starts only once Firebase has been initialised by the app (initApp) and the user is logged in
   function startFirebaseMachiningListeners() {
     if (fsListenersStarted) return;
-    if (typeof firebase === "undefined" || !firebase.firestore) return;
+    if (typeof firebase === "undefined" || !firebase.firestore || !firebase.apps || !firebase.apps.length) return;
     if (typeof isMockMode === "function" && isMockMode()) return;
+    let authUser = null;
+    try { authUser = firebase.auth().currentUser; } catch (e) { return; }
+    if (!authUser || authUser.isAnonymous) return;
     fsListenersStarted = true;
+    console.log("[Machining] Live Firebase machining data connected.");
     const db = firebase.firestore();
     const onSnap = snap => {
       snap.docChanges().forEach(ch => {
@@ -1022,7 +1027,7 @@
     if (typeof window.executeRenderAll === "function") {
       const orig = window.executeRenderAll;
       window.executeRenderAll = function () {
-        try { applyFirebaseMachining(); } catch (e) {}
+        try { startFirebaseMachiningListeners(); applyFirebaseMachining(); } catch (e) {}
         const r = orig.apply(this, arguments);
         try {
           updateBadge();
@@ -1144,9 +1149,11 @@
     installHooks();
     bindEvents();
     console.log("[Machining] Department module v" + MODULE_VERSION + " loaded.");
-    if (typeof firebase !== "undefined" && firebase.auth) {
-      firebase.auth().onAuthStateChanged(u => { if (u && !u.isAnonymous) startFirebaseMachiningListeners(); });
-    }
+    // Firebase is initialised later by the app, so keep checking until it is ready
+    const fsWait = setInterval(() => {
+      try { startFirebaseMachiningListeners(); } catch (e) {}
+      if (fsListenersStarted) clearInterval(fsWait);
+    }, 1500);
   } catch (err) {
     console.error("[Machining] Failed to load module:", err);
   }
