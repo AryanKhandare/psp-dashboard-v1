@@ -20,7 +20,7 @@
   const STAGE_ORDER = ["Inspection", "Machining", "Masking", "Spraying", "Grinding", "Polishing",
                        "Final Inspection", "Dispatch", "Dispatched", "Completed"];
 
-  const MODULE_VERSION = 13;
+  const MODULE_VERSION = 14;
   let selectedKp = null;
   let boardDragging = false; // pause board redraws while a card is being dragged
   let activeSubtab = "machining-subtab-queue";
@@ -175,6 +175,21 @@
     Object.keys(relabel).forEach(k => {
       const lbl = document.querySelector(`#target-zone-${k} .drop-label`);
       if (lbl) lbl.textContent = relabel[k];
+    });
+  }
+
+  // Add "Machining" to every stage's Next Department / Next Process list (right after Inspection)
+  function injectNextStageOptions() {
+    ["spraying-complete-next-process", "grinding-complete-next-process", "masking-complete-next-process",
+     "masking-next-process", "no-masking-next-process"].forEach(id => {
+      const sel = $(id);
+      if (!sel || sel.querySelector('option[value="Machining"]')) return;
+      const o = document.createElement("option");
+      o.value = STAGE;
+      o.textContent = STAGE;
+      const insp = sel.querySelector('option[value="Inspection"]');
+      if (insp) insp.insertAdjacentElement("afterend", o);
+      else sel.insertBefore(o, sel.firstChild);
     });
   }
 
@@ -1228,6 +1243,7 @@
     injectModals();
     injectDropZone();
     injectUserDeptOption();
+    injectNextStageOptions();
     setupStageBoard();
     installHooks();
     bindEvents();
