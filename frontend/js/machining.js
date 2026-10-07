@@ -763,12 +763,69 @@
       ["ondrop", "ondragover", "ondragleave"].forEach(a => box.removeAttribute(a));
     });
 
+    // Drag an Inspection card onto another column = push the job to that stage
+    board.addEventListener("dragstart", e => {
+      const card = e.target.closest && e.target.closest("[data-board-kp]");
+      if (!card) return;
+      e.dataTransfer.setData("text/plain", card.getAttribute("data-board-kp"));
+      e.dataTransfer.effectAllowed = "move";
+      card.classList.add("dragging");
+    });
+    board.addEventListener("dragend", e => {
+      const card = e.target.closest && e.target.closest("[data-board-kp]");
+      if (card) card.classList.remove("dragging");
+      board.querySelectorAll(".drag-over").forEach(el => el.classList.remove("drag-over"));
+    });
+    BOARD_COLUMNS.forEach(c => {
+      const box = $(c.cards);
+      if (!box) return;
+      const column = box.closest(".kanban-column");
+      column.addEventListener("dragover", e => {
+        if (c.stage === "Inspection") return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        box.classList.add("drag-over");
+      });
+      column.addEventListener("dragleave", e => {
+        if (!column.contains(e.relatedTarget)) box.classList.remove("drag-over");
+      });
+      column.addEventListener("drop", e => {
+        e.preventDefault();
+        box.classList.remove("drag-over");
+        if (c.stage === "Inspection") return;
+        const kp = e.dataTransfer.getData("text/plain");
+        const job = kp && allJobs().find(j => j.kpNumber === kp);
+        if (job && job.currentDepartment === "Inspection") pushFromInspection(job, c.stage);
+      });
+    });
+
     board.addEventListener("click", e => {
       const push = e.target.closest("[data-board-push]");
       const open = e.target.closest("[data-board-open]");
       if (push && typeof triggerInspectionFloatingTransition === "function") triggerInspectionFloatingTransition(push.getAttribute("data-board-push"));
       if (open) window.location.hash = "#/" + open.getAttribute("data-board-open");
     });
+  }
+
+  function pushFromInspection(job, targetStage) {
+    if (typeof applyStageTransitionWithUndo !== "function") {
+      if (typeof triggerInspectionFloatingTransition === "function") triggerInspectionFloatingTransition(job.kpNumber);
+      return;
+    }
+    const operator = (typeof getLoggedUser === "function" && getLoggedUser() && getLoggedUser().name) || ((user() && user().email) || "Inspector");
+    window.pendingTransition = {
+      job: job,
+      stage: "Inspection",
+      payloadGenerator: nextStage => ({
+        type: "APPROVE_JOB", kpNo: job.kpNumber, stage: "Inspection",
+        nextStage: nextStage, operatorName: operator, time: new Date().toISOString()
+      }),
+      applyLocalMutation: nextStage => {
+        if (typeof transitionToStage === "function") transitionToStage(job, nextStage, operator);
+        else { job.currentDepartment = nextStage; job.status = "Pending"; }
+      }
+    };
+    applyStageTransitionWithUndo(targetStage);
   }
 
   function stageStatus(job, stage) {
@@ -792,7 +849,8 @@
         const action = c.stage === "Inspection"
           ? (ro ? "" : `<button class="btn btn-secondary btn-xs" style="width:100%; height:28px; font-size:10px;" data-board-push="${esc(job.kpNumber)}">→ Move to Next Stage</button>`)
           : `<button class="btn btn-secondary btn-xs" style="width:100%; height:28px; font-size:10px;" data-board-open="${c.tab}">→ Open ${esc(c.stage)} Stage</button>`;
-        return `<div class="kanban-card">
+        const draggable = c.stage === "Inspection" && !ro;
+        return `<div class="kanban-card" ${draggable ? `draggable="true" data-board-kp="${esc(job.kpNumber)}" style="cursor:grab;"` : ""}>
             <div class="kanban-card-header">
               <span class="kanban-card-kp">${esc(kpLabel(job))}</span>
               <span class="kanban-card-priority ${esc(String(job.priority || "Normal").toLowerCase())}" title="Priority: ${esc(job.priority || "Normal")}"></span>
