@@ -20,7 +20,7 @@
   const STAGE_ORDER = ["Inspection", "Machining", "Masking", "Spraying", "Grinding", "Polishing",
                        "Final Inspection", "Dispatch", "Dispatched", "Completed"];
 
-  const MODULE_VERSION = 11;
+  const MODULE_VERSION = 12;
   let selectedKp = null;
   let boardDragging = false; // pause board redraws while a card is being dragged
   let activeSubtab = "machining-subtab-queue";
@@ -958,6 +958,46 @@
     return { success: true };
   }
 
+  // ---- Guards for job creation (sheet auto-sync and Register Card) ----
+  // 1) Never re-create a job that exists in Firebase (deleted or not): the app's CREATE_JOB uses set(),
+  //    which would overwrite it and wipe the "deleted" mark.
+  // 2) Sheet auto-sync may only add NEW jobs to Inspection. Later stages are reached through the dashboard.
+  const blockedCreates = new Map(); // KP -> reason, remembered for this session (saves Firebase reads)
+  async function shouldBlockCreate(payload) {
+    const kp = String(payload.kpNo || "").trim();
+    if (!kp) return "";
+    if (blockedCreates.has(kp)) return blockedCreates.get(kp);
+    const target = payload.currentDepartment || "Inspection";
+    if (target !== "Inspection") {
+      const why = `new jobs are only added to Inspection (sheet said ${target})`;
+      blockedCreates.set(kp, why);
+      return why;
+    }
+    const remember = why => { if (why) blockedCreates.set(kp, why); return why; };
+    try {
+      const deleted = window.deletedJobs;
+      if (deleted && deleted.has && deleted.has(kp.toLowerCase())) return remember("job was deleted");
+      const db = firebase.firestore();
+      const byId = await db.collection("jobs").doc(`job_${kp}`).get();
+      if (byId.exists) return remember(byId.data().isDeleted === true ? "job was deleted" : "job already exists");
+      const byKp = await db.collection("jobs").where("kpNumber", "==", kp).limit(1).get();
+      if (!byKp.empty) return remember(byKp.docs[0].data().isDeleted === true ? "job was deleted" : "job already exists");
+    } catch (e) {
+      console.warn("[Machining] Could not check existing job for", kp, e && e.message ? e.message : e);
+    }
+    return "";
+  }
+
+  // Auto-sync adds the job to the screen before saving; remove it again when the save is skipped
+  function dropLocalPhantom(kp) {
+    const list = allJobs();
+    for (let i = list.length - 1; i >= 0; i--) {
+      const j = list[i];
+      if (j && j.kpNumber === kp && !j.id) list.splice(i, 1);
+    }
+    if (typeof renderAll === "function") renderAll();
+  }
+
   function stageStatus(job, stage) {
     const key = stage.toLowerCase().replace(/[^a-z]/g, "");
     return (job[key] && job[key].status) || job.status || "Pending";
@@ -1056,9 +1096,18 @@
     if (typeof window.sendBackendPost === "function") {
       const origSend = window.sendBackendPost;
       window.sendBackendPost = async function (payload) {
-        if (payload && String(payload.type || "").toUpperCase() === "MOVE_STAGE") {
+        const type = String((payload && (payload.type || payload.action)) || "").toUpperCase().replace(/_/g, "");
+        if (type === "MOVESTAGE") {
           if (typeof isMockMode === "function" && isMockMode()) return { success: true };
           return saveMoveStage(payload);
+        }
+        if (type === "CREATEJOB" && !(typeof isMockMode === "function" && isMockMode())) {
+          const blocked = await shouldBlockCreate(payload);
+          if (blocked) {
+            dropLocalPhantom(payload.kpNo);
+            console.log(`[Machining] Skipped creating ${payload.kpNo}: ${blocked}`);
+            return { success: true, skipped: blocked };
+          }
         }
         return origSend.apply(this, arguments);
       };
