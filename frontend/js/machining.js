@@ -20,7 +20,7 @@
   const STAGE_ORDER = ["Inspection", "Machining", "Masking", "Spraying", "Grinding", "Polishing",
                        "Final Inspection", "Dispatch", "Dispatched", "Completed"];
 
-  const MODULE_VERSION = 9;
+  const MODULE_VERSION = 10;
   let selectedKp = null;
   let boardDragging = false; // pause board redraws while a card is being dragged
   let activeSubtab = "machining-subtab-queue";
@@ -38,6 +38,51 @@
     return jc ? `${kp} (${jc})` : kp;
   };
   const qtyLabel = job => (typeof renderQuantityWithHistory === "function") ? renderQuantityWithHistory(job) : esc(job.quantity);
+
+  // ===================== OWN FIREBASE READ FOR MACHINING DATA =====================
+  // The app's job loader (firestore-service.js) may not copy the "machining" field onto jobs.
+  // This keeps a live copy of it straight from Firebase and puts it back on the jobs before every render.
+  const fsMachining = new Map(); // KP number -> machining data from Firebase
+  let fsListenersStarted = false;
+
+  function applyFirebaseMachining() {
+    allJobs().forEach(job => {
+      const fs = fsMachining.get(job.kpNumber);
+      if (!fs) return;
+      const local = job.machining;
+      const localEmpty = !local || typeof local !== "object" || (!local.machineName && !local.operatorName);
+      const fsAhead = local && local.status === "Pending" && fs.status && fs.status !== "Pending";
+      if (localEmpty || fsAhead) {
+        job.machining = JSON.parse(JSON.stringify(fs));
+        if (!Array.isArray(job.machining.holdHistory)) job.machining.holdHistory = [];
+      }
+    });
+  }
+
+  function startFirebaseMachiningListeners() {
+    if (fsListenersStarted) return;
+    if (typeof firebase === "undefined" || !firebase.firestore) return;
+    if (typeof isMockMode === "function" && isMockMode()) return;
+    fsListenersStarted = true;
+    const db = firebase.firestore();
+    const onSnap = snap => {
+      snap.docChanges().forEach(ch => {
+        const d = ch.doc.data();
+        if (!d.kpNumber) return;
+        if (ch.type === "removed" && d.currentStage !== "Machining" && !(d.machining && d.machining.status === "Completed")) {
+          fsMachining.delete(d.kpNumber);
+        } else if (d.machining) {
+          fsMachining.set(d.kpNumber, d.machining);
+        }
+      });
+      applyFirebaseMachining();
+      if (typeof renderAll === "function") renderAll();
+    };
+    const onErr = err => console.warn("[Machining] Firebase listener error:", err && err.message ? err.message : err);
+    // Jobs currently in Machining, and jobs that finished Machining (for History)
+    db.collection("jobs").where("currentStage", "==", "Machining").onSnapshot(onSnap, onErr);
+    db.collection("jobs").where("machining.status", "==", "Completed").onSnapshot(onSnap, onErr);
+  }
 
   function ensureMachining(job) {
     if (!job.machining || typeof job.machining !== "object") job.machining = {};
@@ -977,6 +1022,7 @@
     if (typeof window.executeRenderAll === "function") {
       const orig = window.executeRenderAll;
       window.executeRenderAll = function () {
+        try { applyFirebaseMachining(); } catch (e) {}
         const r = orig.apply(this, arguments);
         try {
           updateBadge();
@@ -1098,6 +1144,9 @@
     installHooks();
     bindEvents();
     console.log("[Machining] Department module v" + MODULE_VERSION + " loaded.");
+    if (typeof firebase !== "undefined" && firebase.auth) {
+      firebase.auth().onAuthStateChanged(u => { if (u && !u.isAnonymous) startFirebaseMachiningListeners(); });
+    }
   } catch (err) {
     console.error("[Machining] Failed to load module:", err);
   }
