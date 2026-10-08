@@ -2,7 +2,6 @@
   "cleanUrls": false,
   "rewrites": [
     { "source": "/", "destination": "/frontend/index.html" },
-    { "source": "/index", "destination": "/frontend/index.html" },
     { "source": "/index.html", "destination": "/frontend/index.html" },
     { "source": "/login", "destination": "/frontend/login.html" },
     { "source": "/login.html", "destination": "/frontend/login.html" },
@@ -11,17 +10,11 @@
     { "source": "/frontend", "destination": "/frontend/index.html" },
     { "source": "/frontend/", "destination": "/frontend/index.html" },
     { "source": "/frontend/index", "destination": "/frontend/index.html" },
-    { "source": "/frontend/index.html", "destination": "/frontend/index.html" },
     { "source": "/frontend/login", "destination": "/frontend/login.html" },
-    { "source": "/frontend/login.html", "destination": "/frontend/login.html" },
     { "source": "/frontend/spraying", "destination": "/frontend/spraying.html" },
-    { "source": "/frontend/spraying.html", "destination": "/frontend/spraying.html" },
     { "source": "/css/(.*)", "destination": "/frontend/css/$1" },
     { "source": "/js/(.*)", "destination": "/frontend/js/$1" },
-    { "source": "/frontend/css/(.*)", "destination": "/frontend/css/$1" },
-    { "source": "/frontend/js/(.*)", "destination": "/frontend/js/$1" },
-    { "source": "/frontend/(.*)", "destination": "/frontend/$1" },
-    { "source": "/(.*)", "destination": "/frontend/$1" }
+    { "source": "/((?!frontend/).*)", "destination": "/frontend/$1" }
   ],
   "headers": [
     {
