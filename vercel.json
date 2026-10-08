@@ -8,8 +8,14 @@
     { "source": "/login.html", "destination": "/frontend/login.html" },
     { "source": "/spraying", "destination": "/frontend/spraying.html" },
     { "source": "/spraying.html", "destination": "/frontend/spraying.html" },
+    { "source": "/frontend", "destination": "/frontend/index.html" },
+    { "source": "/frontend/", "destination": "/frontend/index.html" },
+    { "source": "/frontend/index", "destination": "/frontend/index.html" },
+    { "source": "/frontend/login", "destination": "/frontend/login.html" },
+    { "source": "/frontend/spraying", "destination": "/frontend/spraying.html" },
     { "source": "/css/(.*)", "destination": "/frontend/css/$1" },
-    { "source": "/js/(.*)", "destination": "/frontend/js/$1" }
+    { "source": "/js/(.*)", "destination": "/frontend/js/$1" },
+    { "source": "/((?!frontend/).*)", "destination": "/frontend/$1" }
   ],
   "headers": [
     {
