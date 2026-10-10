@@ -7,7 +7,7 @@
 (function () {
   if (!window.PSP) { console.error("[PSP] backlog-report: psp-common.js must load first."); return; }
   const { $, esc, opts, allJobs, user, isReadOnly, fmt, kpLabel, qtyLabel, stageKeyOf } = window.PSP;
-  const MODULE_VERSION = 1;
+  const MODULE_VERSION = 3;
 
   // ===================== BACKLOG REPORT (all departments) =====================
   const BACKLOG_STAGES = ["Inspection", "Machining", "Masking", "Spraying", "Grinding", "Polishing", "Final Inspection", "Dispatch"];
@@ -38,7 +38,7 @@
       <div class="section-header" style="display:flex; justify-content:space-between; align-items:flex-end; gap:16px; flex-wrap:wrap;">
         <div>
           <h2>Department Backlog Report</h2>
-          <p class="section-desc">Every open job by department: how long it has waited in its current stage and how close it is to its due date. Click a department card to filter.</p>
+          <p class="section-desc">Every open job by department: days in its current stage, job age since material was received, and days left to (or past) the delivery date from the Q2P sheet. Click a department card to filter.</p>
         </div>
         <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
           <label for="backlog-filter-dept" style="font-weight:700; font-size:13px;">Department:</label>
@@ -65,7 +65,7 @@
             <table class="data-table">
               <thead><tr>
                 <th>Department</th><th>KP Number</th><th>Part Name</th><th>Customer</th><th>Qty</th><th>Status</th>
-                <th>Operator / Machine</th><th>In Stage Since</th><th>Days in Stage</th><th>Due Date</th><th>Days Left</th>
+                <th>Operator / Machine</th><th>In Stage Since</th><th>Days in Stage</th><th>Job Age</th><th>Delivery Date</th><th>Days Left / Overdue</th>
               </tr></thead>
               <tbody id="backlog-table-body"></tbody>
             </table>
@@ -100,6 +100,61 @@
     const d = new Date(v);
     return isNaN(d.getTime()) ? null : d;
   }
+  // ---- Delivery (Q) and received (D) dates read straight from the Q2P sheet, for this report only ----
+  // The rest of the dashboard keeps its own dates (TAT chips etc. are not affected).
+  const sheetDates = new Map();   // KP -> { received: Date|null, delivery: Date|null }
+  let sheetDatesAt = 0, sheetDatesLoading = false, sheetDatesError = "";
+  const SHEET_DATES_MAX_AGE = 5 * 60 * 1000;
+
+  function sheetCellDate(c) {
+    if (!c) return null;
+    const v = c.v;
+    if (v instanceof Date || Object.prototype.toString.call(v) === "[object Date]") {
+      return isNaN(v.getTime()) ? null : new Date(v.getFullYear(), v.getMonth(), v.getDate());
+    }
+    const txt = String(c.f != null ? c.f : (v != null ? v : "")).trim();
+    if (!txt) return null;
+    let m = txt.match(/^Date\((\d+),(\d+),(\d+)/);
+    if (m) return new Date(Number(m[1]), Number(m[2]), Number(m[3]));
+    m = txt.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/);          // day-first: 05/10/2026 = 5 Oct
+    if (m) return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
+    m = txt.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    return null;
+  }
+
+  async function loadSheetDates(force) {
+    if (sheetDatesLoading) return;
+    if (!force && sheetDatesAt && Date.now() - sheetDatesAt < SHEET_DATES_MAX_AGE) return;
+    if (typeof fetchGVizData !== "function") { sheetDatesError = "sheet reader not available"; return; }
+    sheetDatesLoading = true;
+    try {
+      const table = await fetchGVizData("SELECT T, D, Q WHERE T IS NOT NULL");
+      sheetDates.clear();
+      ((table && table.rows) || []).forEach(r => {
+        const c = r.c || [];
+        const kp = String((c[0] && c[0].v) || "").trim().toUpperCase();
+        if (!/^KP-/.test(kp)) return;
+        sheetDates.set(kp, { received: sheetCellDate(c[1]), delivery: sheetCellDate(c[2]) });
+      });
+      sheetDatesAt = Date.now();
+      sheetDatesError = "";
+    } catch (e) {
+      sheetDatesError = (e && e.message) ? e.message : String(e);
+      console.warn("[Backlog] Could not read delivery dates from the sheet:", sheetDatesError);
+    } finally {
+      sheetDatesLoading = false;
+      renderBacklog();
+    }
+  }
+
+  function datesFor(kp) {
+    const k = String(kp || "").trim().toUpperCase();
+    if (sheetDates.has(k)) return sheetDates.get(k);
+    const i = k.indexOf("-R");                     // split jobs (KP-xxx-01-R1) use the parent KP's dates
+    return i !== -1 ? (sheetDates.get(k.slice(0, i)) || null) : null;
+  }
+
   const dayDiff = (a, b) => Math.floor((a - b) / 86400000);
   const fmtDate = d => d ? d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—";
 
@@ -114,12 +169,15 @@
                  || (dept === "Inspection" ? parseDateSafe(j.inspectionDate) : null);
       let status = sd.status || j.status || "Pending";
       if (status === "Completed") status = "Pending"; // finished the previous cycle here, waiting to move on
-      const due = parseDateSafe(j.plannedCompletionDate);
+      const sd2 = datesFor(j.kpNumber);
+      const due = sd2 ? sd2.delivery : null;        // Q2P column Q "Del Date"
+      const received = sd2 ? sd2.received : null;   // Q2P column D "Incoming Date"
       const who = [sd.operatorName || j.operatorName || "", sd.machineName || sd.grindingMachine || sd.booth || ""].filter(Boolean).join(" · ");
       return {
         dept, kp: j.kpNumber, label: kpLabel(j), part: j.partName || "", customer: j.customer || "", qty: j.quantity || "",
         status, who, since, daysIn: since ? Math.max(0, dayDiff(now, since)) : null,
         due, daysLeft: due ? dayDiff(due, new Date(now.toDateString())) : null,
+        received, age: received ? Math.max(0, dayDiff(new Date(now.toDateString()), new Date(received.toDateString()))) : null,
         jc: (typeof getJobJcNo === "function") ? getJobJcNo(j) : (j.jcNo || ""), priority: j.priority || "Normal"
       };
     });
@@ -146,6 +204,7 @@
     if (badge) badge.textContent = rows.length;
     const pane = $("tab-backlog");
     if (!pane || !pane.classList.contains("active")) return;
+    loadSheetDates(false);
 
     // Department cards
     $("backlog-cards").innerHTML = BACKLOG_STAGES.map(d => {
@@ -169,7 +228,10 @@
     if (exportBtn) exportBtn.textContent = `⬇️ Export Excel – ${backlogFilter.dept || "All Departments"}`;
     const list = filteredBacklog(rows);
     $("backlog-summary-line").textContent = `${list.length} of ${rows.length} open jobs shown` +
-      (backlogFilter.dept ? ` · ${backlogFilter.dept}` : "") + " · sorted by department, then longest waiting first";
+      (backlogFilter.dept ? ` · ${backlogFilter.dept}` : "") + " · sorted by department, then longest waiting first" +
+      (sheetDatesLoading ? " · reading delivery dates from Q2P sheet…"
+        : sheetDatesError ? ` · delivery dates not available (${sheetDatesError})`
+        : sheetDatesAt ? ` · delivery dates from Q2P sheet at ${new Date(sheetDatesAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}` : "");
 
     const statusStyle = st => st === "In Progress" ? "background:#3b82f6;" : st === "Hold" ? "background:#ef4444;" : "background:#f97316;";
     $("backlog-table-body").innerHTML = list.length ? list.map(r => {
@@ -184,10 +246,11 @@
         <td>${esc(r.who || "—")}</td>
         <td>${fmtDate(r.since)}</td>
         <td class="font-mono" style="${longWait ? "color:#f97316; font-weight:700;" : ""}">${r.daysIn === null ? "—" : r.daysIn + " d"}</td>
+        <td class="font-mono" title="${r.received ? "Material received " + fmtDate(r.received) : ""}">${r.age === null ? "—" : r.age + " d"}</td>
         <td>${fmtDate(r.due)}</td>
-        <td class="font-mono" style="${late ? "color:#ef4444; font-weight:800;" : soon ? "color:#f97316; font-weight:700;" : ""}">${r.daysLeft === null ? "—" : late ? Math.abs(r.daysLeft) + " d LATE" : r.daysLeft + " d"}</td>
+        <td class="font-mono" style="${late ? "color:#ef4444; font-weight:800;" : soon ? "color:#f97316; font-weight:700;" : ""}">${r.daysLeft === null ? "—" : late ? Math.abs(r.daysLeft) + " d LATE" : (r.daysLeft === 0 ? "Due today" : r.daysLeft + " d left")}</td>
       </tr>`;
-    }).join("") : `<tr><td colspan="11" class="text-center text-muted">No open jobs match these filters.</td></tr>`;
+    }).join("") : `<tr><td colspan="12" class="text-center text-muted">No open jobs match these filters.</td></tr>`;
   }
 
   // ---- Real Excel (.xlsx) export via SheetJS, loaded only when needed ----
@@ -204,11 +267,12 @@
   }
 
   const XL_HEAD = ["Department", "KP Number", "JC No", "Part Name", "Customer", "Qty", "Status", "Operator / Machine",
-                   "In Stage Since", "Days in Stage", "Due Date", "Days Left", "Overdue", "Priority"];
+                   "In Stage Since", "Days in Stage", "Material Received", "Job Age (days)", "Delivery Date", "Days Left", "Overdue (days)", "Priority"];
   const xlDate = d => d ? `${String(d.getDate()).padStart(2, "0")}-${String(d.getMonth() + 1).padStart(2, "0")}-${d.getFullYear()}` : "";
   const xlRow = r => [r.dept, r.kp, r.jc, r.part, r.customer, Number(r.qty) || r.qty, r.status, r.who,
-                      xlDate(r.since), r.daysIn ?? "", xlDate(r.due), r.daysLeft ?? "",
-                      (r.daysLeft !== null && r.daysLeft < 0) ? "YES" : "", r.priority];
+                      xlDate(r.since), r.daysIn ?? "", xlDate(r.received), r.age ?? "", xlDate(r.due),
+                      (r.daysLeft !== null && r.daysLeft >= 0) ? r.daysLeft : "",
+                      (r.daysLeft !== null && r.daysLeft < 0) ? Math.abs(r.daysLeft) : "", r.priority];
 
   function xlSheet(XLSX, aoa, widths) {
     const ws = XLSX.utils.aoa_to_sheet(aoa);
@@ -225,7 +289,7 @@
       const XLSX = await loadSheetJS();
       const all = backlogRows();
       const list = filteredBacklog(all);
-      const widths = [16, 14, 10, 26, 30, 6, 12, 24, 14, 12, 12, 10, 9, 9];
+      const widths = [16, 14, 10, 26, 30, 6, 12, 24, 14, 12, 16, 13, 14, 10, 13, 9];
       const wb = XLSX.utils.book_new();
       const stamp = new Date();
 
@@ -270,11 +334,12 @@
     const list = filteredBacklog(backlogRows());
     const q = v => `"${String(v == null ? "" : v).replace(/"/g, '""')}"`;
     const head = ["Department", "KP Number", "JC No", "Part Name", "Customer", "Qty", "Status", "Operator / Machine",
-                  "In Stage Since", "Days in Stage", "Due Date", "Days Left", "Priority"];
+                  "In Stage Since", "Days in Stage", "Material Received", "Job Age (days)", "Delivery Date", "Days Left", "Overdue (days)", "Priority"];
     const lines = [head.map(q).join(",")].concat(list.map(r => [
       r.dept, r.kp, r.jc, r.part, r.customer, r.qty, r.status, r.who,
-      r.since ? r.since.toISOString().slice(0, 10) : "", r.daysIn ?? "",
-      r.due ? r.due.toISOString().slice(0, 10) : "", r.daysLeft ?? "", r.priority
+      xlDate(r.since), r.daysIn ?? "", xlDate(r.received), r.age ?? "", xlDate(r.due),
+      (r.daysLeft !== null && r.daysLeft >= 0) ? r.daysLeft : "",
+      (r.daysLeft !== null && r.daysLeft < 0) ? Math.abs(r.daysLeft) : "", r.priority
     ].map(q).join(",")));
     const blob = new Blob(["\ufeff" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a");
