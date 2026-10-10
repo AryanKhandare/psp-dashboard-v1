@@ -1,14 +1,17 @@
 /**
  * PSP MES – Machining Department (stage 02, between Inspection and Masking).
  *
- * Self-contained module: builds its own sidebar button, tab (Queue / Active Job / History),
- * pop-ups and drag-to-next-stage target, and plugs into the existing permissions, rendering,
- * timers and Firebase save logic (START_CYCLE / PAUSE_CYCLE / RESUME_CYCLE / END_CYCLE / SPLIT_STAGE).
+ * Machining tab only: sidebar button, Queue / Active Job / History, start-pause-resume-end pop-ups,
+ * the "02. Machining" drag target, live Machining data from Firebase, Machining permissions.
  *
- * Load in index.html AFTER grinding.js and dashboard.js, BEFORE app.js.
- * Requires firestore-service.js to map the "machining" field (one line, see setup notes).
+ * Load order in index.html: psp-common.js → machining.js → stage-board.js → job-guards.js
+ *                          → backlog-report.js → ui-tweaks.js → app.js
  */
 (function () {
+  if (!window.PSP) { console.error("[PSP] machining: psp-common.js must load first."); return; }
+  const { $, esc, opts, allJobs, user, isReadOnly, fmt, kpLabel, qtyLabel, stageKeyOf } = window.PSP;
+  const MODULE_VERSION = 19;
+
   // ===================== CONFIG =====================
   const STAGE = "Machining";
   const MACHINES = ["Lathe Machine-1", "Lathe Machine-2", "Lathe Machine-3", "Lathe Machine-4",
@@ -20,24 +23,8 @@
   const STAGE_ORDER = ["Inspection", "Machining", "Masking", "Spraying", "Grinding", "Polishing",
                        "Final Inspection", "Dispatch", "Dispatched", "Completed"];
 
-  const MODULE_VERSION = 15;
   let selectedKp = null;
-  let boardDragging = false; // pause board redraws while a card is being dragged
   let activeSubtab = "machining-subtab-queue";
-
-  const $ = id => document.getElementById(id);
-  const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  const opts = (list, selected) => list.map(v => `<option value="${esc(v)}" ${v === selected ? "selected" : ""}>${esc(v)}</option>`).join("");
-  const allJobs = () => (typeof jobs !== "undefined" && Array.isArray(jobs)) ? jobs : [];
-  const user = () => (typeof currentUser !== "undefined" && currentUser) ? currentUser : null;
-  const isReadOnly = () => { const u = user(); return !!(u && u.role === "hr_admin"); };
-  const fmt = ms => (typeof formatDuration === "function") ? formatDuration(ms || 0) : "00:00:00";
-  const kpLabel = job => {
-    const kp = (typeof getCleanKpNumber === "function") ? getCleanKpNumber(job.kpNumber) : job.kpNumber;
-    const jc = (typeof getJobJcNo === "function") ? getJobJcNo(job) : (job.jcNo || "");
-    return jc ? `${kp} (${jc})` : kp;
-  };
-  const qtyLabel = job => (typeof renderQuantityWithHistory === "function") ? renderQuantityWithHistory(job) : esc(job.quantity);
 
   // ===================== OWN FIREBASE READ FOR MACHINING DATA =====================
   // The app's job loader (firestore-service.js) may not copy the "machining" field onto jobs.
@@ -178,39 +165,6 @@
     });
   }
 
-  // Add "Machining" to every stage's Next Department / Next Process list (right after Inspection)
-  function injectNextStageOptions() {
-    ["spraying-complete-next-process", "grinding-complete-next-process", "masking-complete-next-process",
-     "masking-next-process", "no-masking-next-process"].forEach(id => {
-      const sel = $(id);
-      if (!sel || sel.querySelector('option[value="Machining"]')) return;
-      const o = document.createElement("option");
-      o.value = STAGE;
-      o.textContent = STAGE;
-      const insp = sel.querySelector('option[value="Inspection"]');
-      if (insp) insp.insertAdjacentElement("afterend", o);
-      else sel.insertBefore(o, sel.firstChild);
-    });
-  }
-
-  // Spraying "can't leave the screen" lock: keep it ONLY for Spraying operators.
-  // The app sets window.sprayingJobActive whenever a spraying job runs, for every user; admins got locked too.
-  function limitSprayingLockToOperators() {
-    let raw = !!window.sprayingJobActive;
-    const isSprayingOperator = () => {
-      const u = user();
-      if (!u || u.role !== "operator") return false;
-      const dept = typeof getCleanDeptKey === "function" ? getCleanDeptKey(u.department) : u.department;
-      return String(dept || "").toLowerCase().includes("spray");
-    };
-    try {
-      Object.defineProperty(window, "sprayingJobActive", {
-        configurable: true,
-        get() { return raw && isSprayingOperator(); },
-        set(v) { raw = !!v; }
-      });
-    } catch (e) { console.warn("[Machining] Could not adjust spraying lock:", e); }
-  }
 
   function injectUserDeptOption() {
     const sel = $("user-dept");
@@ -812,285 +766,6 @@
   }
 
 
-  // ===================== INSPECTION PAGE STAGE BOARD =====================
-  // Turns the 5-column board on the Inspection page into a real stage board:
-  // INSPECTION | MACHINING | MASKING | SPRAYING | GRINDING | POLISHING (jobs actually in each stage).
-  const BOARD_COLUMNS = [
-    { stage: "Inspection", tab: "inspection", cards: "cards-intake",           count: "count-intake" },
-    { stage: "Machining",  tab: "machining",  cards: "cards-machining-stage",  count: "count-machining-stage" },
-    { stage: "Masking",    tab: "masking",    cards: "cards-visual",           count: "count-visual" },
-    { stage: "Spraying",   tab: "spraying",   cards: "cards-dimensional",      count: "count-dimensional" },
-    { stage: "Grinding",   tab: "grinding",   cards: "cards-review",           count: "count-review" },
-    { stage: "Polishing",  tab: "polishing",  cards: "cards-ready",            count: "count-ready" }
-  ];
-
-  function setupStageBoard() {
-    const board = document.querySelector(".inspection-kanban-board");
-    const first = $("cards-intake");
-    if (!board || !first || $("cards-machining-stage")) return;
-    board.style.gridTemplateColumns = "repeat(6, minmax(0, 1fr))";
-
-    // Insert the MACHINING column right after INSPECTION
-    const firstCol = first.closest(".kanban-column");
-    const col = document.createElement("div");
-    col.className = "kanban-column";
-    col.setAttribute("data-status", "Machining");
-    col.innerHTML = `<div class="kanban-column-header" style="border-color:#64748b;">
-        <span class="column-title">MACHINING</span><span class="column-count" id="count-machining-stage">0</span></div>
-      <div class="kanban-cards-container" id="cards-machining-stage"></div>`;
-    firstCol.insertAdjacentElement("afterend", col);
-
-    // Stage names as column titles; switch off the old sub-step drag & drop
-    BOARD_COLUMNS.forEach(c => {
-      const box = $(c.cards);
-      if (!box) return;
-      const title = box.closest(".kanban-column").querySelector(".column-title");
-      if (title) title.textContent = c.stage.toUpperCase();
-      ["ondrop", "ondragover", "ondragleave"].forEach(a => box.removeAttribute(a));
-    });
-
-    // Drag an Inspection card onto another column = push the job to that stage
-    board.addEventListener("dragstart", e => {
-      const card = e.target.closest && e.target.closest("[data-board-kp]");
-      if (!card) return;
-      boardDragging = true;
-      e.dataTransfer.setData("text/plain", card.getAttribute("data-board-kp"));
-      e.dataTransfer.effectAllowed = "move";
-      card.classList.add("dragging");
-    });
-    board.addEventListener("dragend", e => {
-      const card = e.target.closest && e.target.closest("[data-board-kp]");
-      if (card) card.classList.remove("dragging");
-      board.querySelectorAll(".drag-over").forEach(el => el.classList.remove("drag-over"));
-      boardDragging = false;
-      setTimeout(() => { try { renderStageBoard(); } catch (err) {} }, 50);
-    });
-    BOARD_COLUMNS.forEach(c => {
-      const box = $(c.cards);
-      if (!box) return;
-      const column = box.closest(".kanban-column");
-      column.addEventListener("dragover", e => {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = "move";
-        box.classList.add("drag-over");
-      });
-      column.addEventListener("dragleave", e => {
-        if (!column.contains(e.relatedTarget)) box.classList.remove("drag-over");
-      });
-      column.addEventListener("drop", e => {
-        e.preventDefault();
-        box.classList.remove("drag-over");
-        boardDragging = false;
-        const kp = e.dataTransfer.getData("text/plain");
-        console.log("[Machining] Board drop:", kp, "→", c.stage);
-        const job = kp && allJobs().find(j => j.kpNumber === kp);
-        if (!job || job.currentDepartment === c.stage) return;
-        if (job.currentDepartment === "Inspection") pushFromInspection(job, c.stage);
-        else moveJobOnBoard(job, c.stage);
-      });
-    });
-
-    board.addEventListener("click", e => {
-      const push = e.target.closest("[data-board-push]");
-      const open = e.target.closest("[data-board-open]");
-      if (push && typeof triggerInspectionFloatingTransition === "function") triggerInspectionFloatingTransition(push.getAttribute("data-board-push"));
-      if (open) window.location.hash = "#/" + open.getAttribute("data-board-open");
-    });
-  }
-
-  function pushFromInspection(job, targetStage) {
-    if (typeof applyStageTransitionWithUndo !== "function") {
-      if (typeof triggerInspectionFloatingTransition === "function") triggerInspectionFloatingTransition(job.kpNumber);
-      return;
-    }
-    const operator = (typeof getLoggedUser === "function" && getLoggedUser() && getLoggedUser().name) || ((user() && user().email) || "Inspector");
-    window.pendingTransition = {
-      job: job,
-      stage: "Inspection",
-      payloadGenerator: nextStage => ({
-        type: "APPROVE_JOB", kpNo: job.kpNumber, stage: "Inspection",
-        nextStage: nextStage, operatorName: operator, time: new Date().toISOString()
-      }),
-      applyLocalMutation: nextStage => {
-        if (typeof transitionToStage === "function") transitionToStage(job, nextStage, operator);
-        else { job.currentDepartment = nextStage; job.status = "Pending"; }
-      }
-    };
-    applyStageTransitionWithUndo(targetStage);
-  }
-
-  // Field name of each stage's data on the job ("Final Inspection" is stored as finalInspection)
-  const stageKeyOf = stage => {
-    const k = String(stage || "").toLowerCase().replace(/[^a-z]/g, "");
-    return k === "finalinspection" ? "finalInspection" : k;
-  };
-
-  // Move a job from any stage to any other stage (forward or backward) from the board
-  function moveJobOnBoard(job, targetStage) {
-    if (typeof applyStageTransitionWithUndo !== "function") return;
-    const fromStage = job.currentDepartment;
-    const fromKey = stageKeyOf(fromStage);
-    const fromData = job[fromKey] || {};
-    const running = fromData.status === "In Progress" || fromData.status === "Hold";
-    if (running && !confirm(`${job.kpNumber} is currently ${fromData.status} in ${fromStage}.\nMoving it will stop that cycle.\n\nMove to ${targetStage} anyway?`)) return;
-
-    const operator = (typeof getLoggedUser === "function" && getLoggedUser() && getLoggedUser().name) || ((user() && user().email) || "Supervisor");
-    window.pendingTransition = {
-      job: job,
-      stage: fromStage,
-      payloadGenerator: nextStage => ({
-        type: "MOVE_STAGE", kpNo: job.kpNumber, stage: fromStage, nextStage: nextStage,
-        operatorName: operator, stopRunningCycle: running, time: new Date().toISOString()
-      }),
-      applyLocalMutation: nextStage => {
-        if (running && job[fromKey]) { job[fromKey].status = "Pending"; job[fromKey].lastStartedAt = null; }
-        if (typeof transitionToStage === "function") transitionToStage(job, nextStage, operator);
-        else { job.currentDepartment = nextStage; job.status = "Pending"; }
-        if (selectedKp === job.kpNumber) selectedKp = null;
-      }
-    };
-    applyStageTransitionWithUndo(targetStage);
-  }
-
-  // Firebase save for MOVE_STAGE (the app's own save function has no "move anywhere" step)
-  async function saveMoveStage(payload) {
-    const db = firebase.firestore();
-    const snap = await db.collection("jobs").where("kpNumber", "==", payload.kpNo).get();
-    if (snap.empty) throw new Error(`Job ${payload.kpNo} not found`);
-    const ref = snap.docs[0].ref;
-    const data = snap.docs[0].data();
-    const nowIso = new Date().toISOString();
-    const target = payload.nextStage;
-    const tKey = stageKeyOf(target);
-    const fKey = stageKeyOf(payload.stage);
-
-    const targetData = Object.assign({}, data[tKey] || {}, {
-      status: target === "Dispatched" ? "Completed" : "Pending",
-      queueEntryTime: nowIso, lastStartedAt: null, startTime: null, endTime: null,
-      activeTimeMs: 0, holdHistory: []
-    });
-    if (tKey === "masking" && !Array.isArray(targetData.materials)) targetData.materials = [];
-
-    const updates = {
-      currentStage: target,
-      currentStatus: target === "Dispatched" ? "Completed" : "Pending",
-      assignedOperator: null,
-      shift: "",
-      splitRemark: "",
-      lastUpdated: firebase.firestore.FieldValue.serverTimestamp(),
-      [tKey]: targetData,
-      [`stageAssignedAt.${String(target).toLowerCase().replace(/[^a-z]/g, "")}`]: nowIso
-    };
-    if (payload.stopRunningCycle && fKey && fKey !== tKey && data[fKey]) {
-      updates[fKey] = Object.assign({}, data[fKey], { status: "Pending", lastStartedAt: null });
-    }
-    if (payload.reworkReasonCategory) {
-      updates.lastRework = { from: payload.stage, to: target, reason: payload.reworkReasonCategory,
-                             comments: payload.reworkReasonComments || "", by: payload.operatorName || "", time: nowIso };
-    }
-    await ref.update(updates);
-    return { success: true };
-  }
-
-  // ---- Guards for job creation (sheet auto-sync and Register Card) ----
-  // 1) Never re-create a job that exists in Firebase (deleted or not): the app's CREATE_JOB uses set(),
-  //    which would overwrite it and wipe the "deleted" mark.
-  // 2) Sheet auto-sync may only add NEW jobs to Inspection. Later stages are reached through the dashboard.
-  const blockedCreates = new Map(); // KP -> reason, remembered for this session (saves Firebase reads)
-  async function shouldBlockCreate(payload) {
-    const kp = String(payload.kpNo || "").trim();
-    if (!kp) return "";
-    if (blockedCreates.has(kp)) return blockedCreates.get(kp);
-    const target = payload.currentDepartment || "Inspection";
-    if (target !== "Inspection") {
-      const why = `new jobs are only added to Inspection (sheet said ${target})`;
-      blockedCreates.set(kp, why);
-      return why;
-    }
-    const remember = why => { if (why) blockedCreates.set(kp, why); return why; };
-    try {
-      const deleted = window.deletedJobs;
-      if (deleted && deleted.has && deleted.has(kp.toLowerCase())) return remember("job was deleted");
-      const db = firebase.firestore();
-      const byId = await db.collection("jobs").doc(`job_${kp}`).get();
-      if (byId.exists) return remember(byId.data().isDeleted === true ? "job was deleted" : "job already exists");
-      const byKp = await db.collection("jobs").where("kpNumber", "==", kp).limit(1).get();
-      if (!byKp.empty) return remember(byKp.docs[0].data().isDeleted === true ? "job was deleted" : "job already exists");
-    } catch (e) {
-      console.warn("[Machining] Could not check existing job for", kp, e && e.message ? e.message : e);
-    }
-    return "";
-  }
-
-  // Returns the Firebase data of a job with this KP that is NOT deleted, or null
-  async function findActiveJob(kpNo) {
-    const kp = String(kpNo || "").trim();
-    if (!kp) return null;
-    try {
-      const db = firebase.firestore();
-      const byId = await db.collection("jobs").doc(`job_${kp}`).get();
-      if (byId.exists && byId.data().isDeleted !== true) return byId.data();
-      const byKp = await db.collection("jobs").where("kpNumber", "==", kp).get();
-      const live = byKp.docs.find(d => d.data().isDeleted !== true);
-      return live ? live.data() : null;
-    } catch (e) {
-      console.warn("[Machining] Could not check active job for", kp, e && e.message ? e.message : e);
-      return null;
-    }
-  }
-
-  // Auto-sync adds the job to the screen before saving; remove it again when the save is skipped
-  function dropLocalPhantom(kp) {
-    const list = allJobs();
-    for (let i = list.length - 1; i >= 0; i--) {
-      const j = list[i];
-      if (j && j.kpNumber === kp && !j.id) list.splice(i, 1);
-    }
-    if (typeof renderAll === "function") renderAll();
-  }
-
-  function stageStatus(job, stage) {
-    const key = stage.toLowerCase().replace(/[^a-z]/g, "");
-    return (job[key] && job[key].status) || job.status || "Pending";
-  }
-
-  function renderStageBoard() {
-    if (!$("cards-machining-stage") || boardDragging) return;
-    const ro = isReadOnly();
-    BOARD_COLUMNS.forEach(c => {
-      const box = $(c.cards);
-      const cnt = $(c.count);
-      if (!box) return;
-      const list = allJobs().filter(j => j.currentDepartment === c.stage);
-      if (cnt) cnt.textContent = list.length;
-      if (!list.length) { box.innerHTML = `<div class="text-xs text-muted" style="text-align:center; padding:12px;">No jobs</div>`; return; }
-      box.innerHTML = list.map(job => {
-        const st = stageStatus(job, c.stage);
-        const badge = st === "In Progress" ? "background:#3b82f6;" : (st === "Hold" ? "background:#ef4444;" : "background:#f97316;");
-        const action = c.stage === "Inspection"
-          ? (ro ? "" : `<button class="btn btn-secondary btn-xs" style="width:100%; height:28px; font-size:10px;" data-board-push="${esc(job.kpNumber)}">→ Move to Next Stage</button>`)
-          : `<button class="btn btn-secondary btn-xs" style="width:100%; height:28px; font-size:10px;" data-board-open="${c.tab}">→ Open ${esc(c.stage)} Stage</button>`;
-        const draggable = !ro;
-        return `<div class="kanban-card" ${draggable ? `draggable="true" data-board-kp="${esc(job.kpNumber)}" style="cursor:grab;"` : ""}>
-            <div class="kanban-card-header">
-              <span class="kanban-card-kp">${esc(kpLabel(job))}</span>
-              <span class="kanban-card-priority ${esc(String(job.priority || "Normal").toLowerCase())}" title="Priority: ${esc(job.priority || "Normal")}"></span>
-            </div>
-            <div class="kanban-card-part">${esc(job.partName || "—")}</div>
-            <div class="kanban-card-cust">${esc(job.customer || "—")}</div>
-            <div class="kanban-card-footer">
-              <span class="kanban-card-qty">${esc(job.quantity || "—")} pcs</span>
-              <span style="font-size:10px; font-weight:700; padding:2px 10px; border-radius:4px; color:#fff; ${badge}">${esc(String(st).toUpperCase())}</span>
-            </div>
-            <div style="margin-top:8px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.06); display:flex; flex-direction:column; gap:4px;">
-              ${action}
-              ${c.stage === "Inspection" && typeof buildDeleteJobButtonHTML === "function" ? buildDeleteJobButtonHTML(job.kpNumber) : ""}
-            </div>
-          </div>`;
-      }).join("");
-    });
-  }
-
   // ===================== HOOKS INTO THE EXISTING APP =====================
   function installHooks() {
     // Permissions: who can open the Machining tab
@@ -1143,55 +818,7 @@
       };
     }
 
-    // Handle MOVE_STAGE saves; every other save goes to the app's normal save function
-    if (typeof window.sendBackendPost === "function") {
-      const origSend = window.sendBackendPost;
-      window.sendBackendPost = async function (payload) {
-        const type = String((payload && (payload.type || payload.action)) || "").toUpperCase().replace(/_/g, "");
-        if (type === "MOVESTAGE") {
-          if (typeof isMockMode === "function" && isMockMode()) return { success: true };
-          return saveMoveStage(payload);
-        }
-        if (type === "CREATEJOB" && !(typeof isMockMode === "function" && isMockMode())) {
-          // REGISTER CARD sends no target stage; the sheet auto-sync always does
-          const isManualRegister = !Object.prototype.hasOwnProperty.call(payload, "currentDepartment");
-          if (isManualRegister) {
-            const active = await findActiveJob(payload.kpNo);
-            if (active) {
-              dropLocalPhantom(payload.kpNo);
-              alert(`${payload.kpNo} is already active in ${active.currentStage || "a stage"}. It was not registered again.`);
-              return { success: true, skipped: "already active" };
-            }
-            // A previously deleted KP may be registered again on purpose: allow it and unblock it
-            const k = String(payload.kpNo || "").trim();
-            blockedCreates.delete(k);
-            if (window.deletedJobs && window.deletedJobs.delete) window.deletedJobs.delete(k.toLowerCase());
-            try { localStorage.setItem("psp_deleted_jobs", JSON.stringify(Array.from(window.deletedJobs || []))); } catch (e) {}
-            console.log(`[Machining] Register Card: ${k} registered in Inspection.`);
-            return origSend.apply(this, arguments);
-          }
-          const blocked = await shouldBlockCreate(payload);
-          if (blocked) {
-            dropLocalPhantom(payload.kpNo);
-            console.log(`[Machining] Skipped creating ${payload.kpNo}: ${blocked}`);
-            return { success: true, skipped: blocked };
-          }
-        }
-        return origSend.apply(this, arguments);
-      };
-    }
-
-    // Inspection page board shows the real stages (keeps the admin tracking table from the original)
-    if (typeof window.renderInspectionDashboard === "function") {
-      const orig = window.renderInspectionDashboard;
-      window.renderInspectionDashboard = function () {
-        const r = orig.apply(this, arguments);
-        try { renderStageBoard(); } catch (e) { console.warn("[Machining] stage board error:", e); }
-        return r;
-      };
-    }
-
-    // Moving a job back from Masking etc. to Machining asks for a rework reason, like other stages
+    // Stage order including Machining: moving a job backwards asks for a rework reason
     if (typeof window.isBackwardTransition === "function") {
       window.isBackwardTransition = function (currentStage, targetStage) {
         const a = STAGE_ORDER.indexOf(currentStage), b = STAGE_ORDER.indexOf(targetStage);
@@ -1200,6 +827,12 @@
       };
     }
   }
+
+  // Lets other add-ons (stage board) clear the Machining station selection when a job is moved away
+  window.PSPMachining = {
+    clearSelection(kp) { if (!kp || selectedKp === kp) selectedKp = null; },
+    render() { renderMachiningDashboard(); }
+  };
 
   function bindEvents() {
     document.querySelectorAll("#tab-machining .machining-tab-btn").forEach(b =>
@@ -1253,8 +886,6 @@
   }
 
   // ===================== BOOT =====================
-  // Runs while the page is still loading, so the existing init (nav permissions, drag targets)
-  // picks up the injected Machining elements.
   try {
     injectStyles();
     injectSidebarButton();
@@ -1262,18 +893,15 @@
     injectModals();
     injectDropZone();
     injectUserDeptOption();
-    injectNextStageOptions();
-    limitSprayingLockToOperators();
-    setupStageBoard();
     installHooks();
     bindEvents();
-    console.log("[Machining] Department module v" + MODULE_VERSION + " loaded.");
     // Firebase is initialised later by the app, so keep checking until it is ready
     const fsWait = setInterval(() => {
       try { startFirebaseMachiningListeners(); } catch (e) {}
       if (fsListenersStarted) clearInterval(fsWait);
     }, 1500);
+    console.log("[PSP] machining v" + MODULE_VERSION + " loaded.");
   } catch (err) {
-    console.error("[Machining] Failed to load module:", err);
+    console.error("[PSP] machining failed to load:", err);
   }
 })();
