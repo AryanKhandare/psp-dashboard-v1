@@ -2735,7 +2735,13 @@
   <script src="js/grinding.js?v=2"></script>
   <script src="js/dashboard.js"></script>
   <script src="js/mes-stage-sync.js?v=2"></script>
-  <script src="js/machining.js?v=15"></script>
+  <!-- PSP add-ons (load in this order, after dashboard.js / mes-stage-sync.js, before app.js) -->
+  <script src="js/psp-common.js?v=1"></script>
+  <script src="js/machining.js?v=19"></script>
+  <script src="js/stage-board.js?v=1"></script>
+  <script src="js/job-guards.js?v=1"></script>
+  <script src="js/backlog-report.js?v=1"></script>
+  <script src="js/ui-tweaks.js?v=1"></script>
   <script src="js/app.js"></script>
 </body>
 </html>
