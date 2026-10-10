@@ -20,7 +20,7 @@
   const STAGE_ORDER = ["Inspection", "Machining", "Masking", "Spraying", "Grinding", "Polishing",
                        "Final Inspection", "Dispatch", "Dispatched", "Completed"];
 
-  const MODULE_VERSION = 14;
+  const MODULE_VERSION = 15;
   let selectedKp = null;
   let boardDragging = false; // pause board redraws while a card is being dragged
   let activeSubtab = "machining-subtab-queue";
@@ -191,6 +191,25 @@
       if (insp) insp.insertAdjacentElement("afterend", o);
       else sel.insertBefore(o, sel.firstChild);
     });
+  }
+
+  // Spraying "can't leave the screen" lock: keep it ONLY for Spraying operators.
+  // The app sets window.sprayingJobActive whenever a spraying job runs, for every user; admins got locked too.
+  function limitSprayingLockToOperators() {
+    let raw = !!window.sprayingJobActive;
+    const isSprayingOperator = () => {
+      const u = user();
+      if (!u || u.role !== "operator") return false;
+      const dept = typeof getCleanDeptKey === "function" ? getCleanDeptKey(u.department) : u.department;
+      return String(dept || "").toLowerCase().includes("spray");
+    };
+    try {
+      Object.defineProperty(window, "sprayingJobActive", {
+        configurable: true,
+        get() { return raw && isSprayingOperator(); },
+        set(v) { raw = !!v; }
+      });
+    } catch (e) { console.warn("[Machining] Could not adjust spraying lock:", e); }
   }
 
   function injectUserDeptOption() {
@@ -1244,6 +1263,7 @@
     injectDropZone();
     injectUserDeptOption();
     injectNextStageOptions();
+    limitSprayingLockToOperators();
     setupStageBoard();
     installHooks();
     bindEvents();
