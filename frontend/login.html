@@ -8,6 +8,24 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Roboto+Mono:wght@400;500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/login.css">
+  <script>
+    // Logo: use the copy in this repo (img/psp-logo.webp), then the company website, then a "PSP" text badge
+    window.pspLogoFallback = function (img) {
+      if (!img.dataset.step) {
+        img.dataset.step = "1";
+        img.src = "https://www.plasmaspray.co.in/dist/img/NEW%20LOGO.webp";
+        return;
+      }
+      img.onerror = null;
+      img.style.display = "none";
+      var badge = document.createElement("span");
+      badge.textContent = "PSP";
+      badge.setAttribute("aria-label", "Plasma Spray Processors");
+      badge.style.cssText = "display:inline-flex;align-items:center;justify-content:center;font-family:Inter,Arial,sans-serif;" +
+        "font-weight:800;font-size:18px;letter-spacing:2px;color:#1c5fa8;padding:4px 10px;";
+      img.parentNode.insertBefore(badge, img.nextSibling);
+    };
+  </script>
 </head>
 <body class="login-body">
 
@@ -36,7 +54,7 @@
         <p class="welcome-text">Welcome to</p>
         <div class="brand-logo-area">
           <div class="brand-logo-box">
-            <img src="https://www.plasmaspray.co.in/dist/img/NEW%20LOGO.webp" alt="PSP Logo" class="brand-logo-img">
+            <img src="img/psp-logo.webp" alt="PSP Logo" class="brand-logo-img" onerror="pspLogoFallback(this)">
           </div>
         </div>
         <h2 class="brand-title">Plasma Spray<br>Processors</h2>
