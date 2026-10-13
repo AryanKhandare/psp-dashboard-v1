@@ -7,7 +7,7 @@
 (function () {
   if (!window.PSP) { console.error("[PSP] ui-tweaks: psp-common.js must load first."); return; }
   const { $, esc, opts, allJobs, user, isReadOnly, fmt, kpLabel, qtyLabel, stageKeyOf } = window.PSP;
-  const MODULE_VERSION = 5;
+  const MODULE_VERSION = 6;
 
   const STAGE = "Machining";
 
@@ -185,6 +185,27 @@
     }
   }
 
+  // Dispatch & Close: the "Select Next Stage" screen has no "Dispatched" target, so a dispatched job could never
+  // be closed (choosing 08. Dispatch just put it back). From the Dispatch stage, close it directly instead:
+  // confirm → job marked Dispatched / Completed (app's own END_CYCLE / SPLIT_STAGE save) with the 10 s UNDO banner.
+  function makeDispatchCloseWork() {
+    if (typeof window.showFloatingCardTransition !== "function") return;
+    const orig = window.showFloatingCardTransition;
+    window.showFloatingCardTransition = function (job, stageName, payloadGenerator, applyLocalMutation) {
+      if (stageName !== "Dispatch" || typeof applyStageTransitionWithUndo !== "function") {
+        return orig.apply(this, arguments);
+      }
+      window.pendingTransition = { job, stage: stageName, payloadGenerator, applyLocalMutation };
+      // quantity entered in the previous prompt is inside the payload generator; show the job's own quantity here
+      const label = (window.PSP && window.PSP.kpLabel) ? window.PSP.kpLabel(job) : job.kpNumber;
+      if (!confirm(`Dispatch and close ${label}?\n\n${job.partName || ""}\n${job.customer || ""}\n\nThe job will be marked Dispatched / Completed and removed from the Dispatch stage.`)) {
+        window.pendingTransition = null;
+        return;
+      }
+      applyStageTransitionWithUndo("Dispatched");
+    };
+  }
+
   function limitSprayingLockToOperators() {
     let raw = !!window.sprayingJobActive;
     const isSprayingOperator = () => {
@@ -210,6 +231,7 @@
     addPostMachiningReason();
     addSprayingActiveList();
     fixNextStageLayoutOnPhones();
+    makeDispatchCloseWork();
     installRenderHook();
     console.log("[PSP] ui-tweaks v" + MODULE_VERSION + " loaded.");
   } catch (err) {
