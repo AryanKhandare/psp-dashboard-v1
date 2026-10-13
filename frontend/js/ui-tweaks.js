@@ -7,7 +7,7 @@
 (function () {
   if (!window.PSP) { console.error("[PSP] ui-tweaks: psp-common.js must load first."); return; }
   const { $, esc, opts, allJobs, user, isReadOnly, fmt, kpLabel, qtyLabel, stageKeyOf } = window.PSP;
-  const MODULE_VERSION = 4;
+  const MODULE_VERSION = 5;
 
   const STAGE = "Machining";
 
@@ -145,6 +145,46 @@
     };
   }
 
+  // "Select Next Stage" screen: fit all stage targets (7 since Machining was added) on any screen size.
+  // Phones: 3 per row, compact boxes, scrollable, and "tap" wording (drag does not work by finger).
+  function fixNextStageLayoutOnPhones() {
+    if ($("psp-next-stage-css")) return;
+    const st = document.createElement("style");
+    st.id = "psp-next-stage-css";
+    st.textContent = `
+      .bottom-stage-selector { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)) !important; }
+      @media (max-width: 700px) {
+        .transition-overlay { overflow-y: auto !important; justify-content: flex-start !important; gap: 14px; padding: 18px 10px 24px !important; }
+        .transition-instruction-header h2 { font-size: 20px !important; margin-bottom: 4px !important; }
+        .transition-instruction-header p { font-size: 12px !important; }
+        .floating-card-center-container { flex: 0 0 auto !important; }
+        .floating-card { width: 100% !important; max-width: 340px !important; padding: 14px !important;
+                         animation: none !important; transform: none !important; }
+        .bottom-stage-selector { grid-template-columns: repeat(3, 1fr) !important; gap: 8px !important;
+                                 padding: 10px !important; max-width: 100% !important; box-sizing: border-box; }
+        .drop-target-stage { padding: 12px 4px !important; gap: 6px !important; min-height: 74px; }
+        .drop-target-stage:hover, .drop-target-stage.drag-active { transform: none !important; }
+        .drop-icon { font-size: 22px !important; }
+        .drop-label { font-size: 10px !important; letter-spacing: .04em !important; text-align: center; }
+      }`;
+    document.head.appendChild(st);
+
+    // Touch screens: say "tap" instead of "drag"
+    const touch = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
+    if (!touch) return;
+    const header = document.querySelector("#transition-drag-overlay .transition-instruction-header p");
+    if (header) header.textContent = "Tap the stage this job goes to next";
+    const card = $("floating-drag-card");
+    if (card) {
+      const fixHint = () => {
+        card.querySelectorAll("*").forEach(el => {
+          if (el.children.length === 0 && /drag me/i.test(el.textContent)) el.textContent = "TAP A STAGE BELOW";
+        });
+      };
+      new MutationObserver(fixHint).observe(card, { childList: true, subtree: true });
+    }
+  }
+
   function limitSprayingLockToOperators() {
     let raw = !!window.sprayingJobActive;
     const isSprayingOperator = () => {
@@ -169,6 +209,7 @@
     limitSprayingLockToOperators();
     addPostMachiningReason();
     addSprayingActiveList();
+    fixNextStageLayoutOnPhones();
     installRenderHook();
     console.log("[PSP] ui-tweaks v" + MODULE_VERSION + " loaded.");
   } catch (err) {
