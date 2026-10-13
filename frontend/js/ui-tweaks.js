@@ -7,7 +7,7 @@
 (function () {
   if (!window.PSP) { console.error("[PSP] ui-tweaks: psp-common.js must load first."); return; }
   const { $, esc, opts, allJobs, user, isReadOnly, fmt, kpLabel, qtyLabel, stageKeyOf } = window.PSP;
-  const MODULE_VERSION = 6;
+  const MODULE_VERSION = 7;
 
   const STAGE = "Machining";
 
@@ -206,6 +206,24 @@
     };
   }
 
+  // Phones: the page used height 100vh, which on mobile browsers includes the area behind the address bar /
+  // navigation buttons, so the bottom of the side menu (user card + LOGOUT) was hidden. Use the visible height
+  // (100dvh) and keep the user card pinned at the bottom of the menu, with the stage list scrolling above it.
+  function fixMobileHeight() {
+    if ($("psp-mobile-height-css")) return;
+    const st = document.createElement("style");
+    st.id = "psp-mobile-height-css";
+    st.textContent = `
+      @supports (height: 100dvh) {
+        body.industrial-theme { height: 100dvh !important; }
+        .transition-overlay { height: 100dvh !important; }
+      }
+      .mes-sidebar { min-height: 0; }
+      .mes-sidebar .sidebar-nav-container { min-height: 0; overflow-y: auto; }
+      .mes-sidebar .sidebar-user-card { flex-shrink: 0; padding-bottom: calc(15px + env(safe-area-inset-bottom, 0px)) !important; }`;
+    document.head.appendChild(st);
+  }
+
   function limitSprayingLockToOperators() {
     let raw = !!window.sprayingJobActive;
     const isSprayingOperator = () => {
@@ -232,6 +250,7 @@
     addSprayingActiveList();
     fixNextStageLayoutOnPhones();
     makeDispatchCloseWork();
+    fixMobileHeight();
     installRenderHook();
     console.log("[PSP] ui-tweaks v" + MODULE_VERSION + " loaded.");
   } catch (err) {
