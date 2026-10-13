@@ -7,7 +7,7 @@
 (function () {
   if (!window.PSP) { console.error("[PSP] ui-tweaks: psp-common.js must load first."); return; }
   const { $, esc, opts, allJobs, user, isReadOnly, fmt, kpLabel, qtyLabel, stageKeyOf } = window.PSP;
-  const MODULE_VERSION = 3;
+  const MODULE_VERSION = 4;
 
   const STAGE = "Machining";
 
@@ -72,6 +72,79 @@
     }
   }
 
+  // Spraying › Active Job: list of all running / on-hold spraying cycles on the right (like Machining / Grinding).
+  // Clicking one shows it in the station monitor.
+  function sprayActiveMs(sp) {
+    let ms = Number((sp && sp.activeTimeMs) || 0);
+    if (sp && sp.status === "In Progress" && sp.lastStartedAt) ms += Date.now() - new Date(sp.lastStartedAt).getTime();
+    return ms;
+  }
+  const fmtMs = ms => (typeof formatDuration === "function") ? formatDuration(ms || 0) : "00:00:00";
+
+  function addSprayingActiveList() {
+    const pane = $("spraying-subtab-active");
+    const layout = pane && pane.querySelector(".split-layout");
+    if (!layout || $("spraying-active-cycles-list")) return;
+    const panel = document.createElement("div");
+    panel.className = "panel";
+    panel.innerHTML = `<div class="panel-header"><h3>ACTIVE SPRAYING CYCLES</h3></div>
+      <div class="panel-body" style="max-height:500px; overflow-y:auto;">
+        <div id="spraying-active-cycles-list" class="active-cards-list"></div>
+      </div>`;
+    layout.appendChild(panel);
+    $("spraying-active-cycles-list").addEventListener("click", e => {
+      const card = e.target.closest("[data-spray-kp]");
+      if (!card) return;
+      try { selectedSprayingJobKp = card.getAttribute("data-spray-kp"); } catch (err) {}
+      if (typeof renderAll === "function") renderAll();
+    });
+    setInterval(() => {
+      const tab = $("tab-spraying");
+      if (!tab || !tab.classList.contains("active")) return;
+      document.querySelectorAll("[data-spray-timer]").forEach(el => {
+        const job = allJobs().find(j => j.kpNumber === el.getAttribute("data-spray-timer"));
+        if (job && job.spraying) el.textContent = fmtMs(sprayActiveMs(job.spraying));
+      });
+    }, 1000);
+  }
+
+  function renderSprayingActiveList() {
+    const box = $("spraying-active-cycles-list");
+    const tab = $("tab-spraying");
+    if (!box || !tab || !tab.classList.contains("active")) return;
+    const list = allJobs().filter(j => j.currentDepartment === "Spraying" && j.spraying &&
+                                      (j.spraying.status === "In Progress" || j.spraying.status === "Hold"));
+    if (!list.length) { box.innerHTML = `<div class="no-selection-message">No running spraying cycles on the shop floor.</div>`; return; }
+    let selected = null;
+    try { selected = selectedSprayingJobKp; } catch (err) {}
+    box.innerHTML = list.map(job => {
+      const sp = job.spraying;
+      const label = (window.PSP && window.PSP.kpLabel) ? window.PSP.kpLabel(job) : job.kpNumber;
+      const qty = (window.PSP && window.PSP.qtyLabel) ? window.PSP.qtyLabel(job) : esc(job.quantity);
+      const who = [sp.sprayingBooth || "", sp.operatorName || job.operatorName || ""].filter(Boolean).join(" · ") || "-";
+      return `<div class="active-card${job.kpNumber === selected ? " selected-card" : ""}" data-spray-kp="${esc(job.kpNumber)}" style="cursor:pointer;">
+          <div class="card-left">
+            <div class="card-kp-row"><span class="card-kp">${esc(label)}</span>
+              <span class="badge ${sp.status === "Hold" ? "badge-hold" : "badge-progress"} text-xs">${esc(sp.status)}</span></div>
+            <span class="card-part">${esc(job.partName)} (${qty})</span>
+            <span class="card-op-info">${esc(who)}</span>
+          </div>
+          <div class="card-right"><span class="card-time font-mono" data-spray-timer="${esc(job.kpNumber)}">${fmtMs(sprayActiveMs(sp))}</span>
+            <span class="text-xs text-muted">Active Run</span></div>
+        </div>`;
+    }).join("");
+  }
+
+  function installRenderHook() {
+    if (typeof window.executeRenderAll !== "function") return;
+    const orig = window.executeRenderAll;
+    window.executeRenderAll = function () {
+      const r = orig.apply(this, arguments);
+      try { renderSprayingActiveList(); } catch (e) { console.warn("[UI Tweaks] spraying list error:", e); }
+      return r;
+    };
+  }
+
   function limitSprayingLockToOperators() {
     let raw = !!window.sprayingJobActive;
     const isSprayingOperator = () => {
@@ -95,6 +168,8 @@
     giveInspectorsFinalInspection();
     limitSprayingLockToOperators();
     addPostMachiningReason();
+    addSprayingActiveList();
+    installRenderHook();
     console.log("[PSP] ui-tweaks v" + MODULE_VERSION + " loaded.");
   } catch (err) {
     console.error("[PSP] ui-tweaks failed to load:", err);
