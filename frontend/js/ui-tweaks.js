@@ -7,7 +7,7 @@
 (function () {
   if (!window.PSP) { console.error("[PSP] ui-tweaks: psp-common.js must load first."); return; }
   const { $, esc, opts, allJobs, user, isReadOnly, fmt, kpLabel, qtyLabel, stageKeyOf } = window.PSP;
-  const MODULE_VERSION = 2;
+  const MODULE_VERSION = 3;
 
   const STAGE = "Machining";
 
@@ -61,6 +61,17 @@
     });
   }
 
+  // Inspectors (operators of the Inspection department: MF, VG, SJ, JN, Laxmi) also get Final Inspection.
+  // Result for them: Inspection + Final Inspection + Performance Reports.
+  function giveInspectorsFinalInspection() {
+    if (typeof ROLE_PERMISSIONS === "undefined" || !ROLE_PERMISSIONS.operator) return;
+    const list = ROLE_PERMISSIONS.operator.Inspection;
+    if (Array.isArray(list) && !list.includes("tab-final-inspection")) {
+      const at = list.indexOf("tab-inspection");
+      list.splice(at === -1 ? list.length : at + 1, 0, "tab-final-inspection");
+    }
+  }
+
   function limitSprayingLockToOperators() {
     let raw = !!window.sprayingJobActive;
     const isSprayingOperator = () => {
@@ -81,6 +92,7 @@
   // ===================== BOOT =====================
   try {
     injectNextStageOptions();
+    giveInspectorsFinalInspection();
     limitSprayingLockToOperators();
     addPostMachiningReason();
     console.log("[PSP] ui-tweaks v" + MODULE_VERSION + " loaded.");
