@@ -1,4 +1,3 @@
-
 // Module 7: Supervisor Control Panel
 function renderSupervisorPanel() {
   const waiting = jobs.filter(j => j.currentDepartment === "Masking" && j.masking?.status === "Pending").length;
@@ -1130,7 +1129,7 @@ function openAssignModal(kpNumber) {
     defaultOpt.textContent = "-- Select Operator --";
     opSelect.appendChild(defaultOpt);
     
-    const presetNames = ["SJ", "DN", "Tripati", "GN", "Vikrant", "Sameer", "Dhuryodhan", "TJ"];
+    const presetNames = ["SJ", "DN", "Tripati", "GN", "Vikrant", "Sameer", "Dhuryodhan", "TJ", "Gaurav"];
     presetNames.forEach(name => {
       const opt = document.createElement("option");
       opt.value = name;
@@ -1220,7 +1219,7 @@ function openNoMaskingModal(kpNumber) {
   
   // Render Operator Touch Buttons
   opButtonsContainer.innerHTML = "";
-  const presetNames = ["SJ", "DN", "Tripati", "GN", "Vikrant", "Sameer", "Dhuryodhan", "TJ"];
+  const presetNames = ["SJ", "DN", "Tripati", "GN", "Vikrant", "Sameer", "Dhuryodhan", "TJ", "Gaurav"];
   
   presetNames.forEach(name => {
     const btn = document.createElement("button");
