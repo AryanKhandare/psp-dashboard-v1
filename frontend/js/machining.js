@@ -10,12 +10,12 @@
 (function () {
   if (!window.PSP) { console.error("[PSP] machining: psp-common.js must load first."); return; }
   const { $, esc, opts, allJobs, user, isReadOnly, fmt, kpLabel, qtyLabel, stageKeyOf } = window.PSP;
-  const MODULE_VERSION = 19;
+  const MODULE_VERSION = 20;
 
   // ===================== CONFIG =====================
   const STAGE = "Machining";
   const MACHINES = ["Lathe Machine-1", "Lathe Machine-2", "Lathe Machine-3", "Lathe Machine-4",
-                    "Lathe Machine-5", "Lathe Machine-6", "Lathe Machine-7"];
+                    "Lathe Machine-5", "Lathe Machine-6", "Lathe Machine-7", "Churchill"];
   const OPERATORS = ["Viraj", "Bhim", "Sandesh", "Manoj"];
   const PROCESSES = ["Pre Machining", "Post Machining"];
   const HOLD_REASONS = ["Material Shortage", "Operator Unavailable", "Machine Issue", "Tool Change / Tool Issue",
