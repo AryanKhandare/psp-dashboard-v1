@@ -14,7 +14,7 @@
 (function () {
   if (!window.PSP) { console.error("[PSP] operator-choice: psp-common.js must load first."); return; }
   const { $, esc, allJobs, user } = window.PSP;
-  const MODULE_VERSION = 1;
+  const MODULE_VERSION = 2;
   const PROD_STAGES = { Masking: "masking", Spraying: "spraying", Grinding: "grinding", Polishing: "polishing" };
 
   // ---------- 1) no automatic assignment ----------
@@ -126,12 +126,76 @@
     };
   }
 
+  // ---------- 4) show the operator in Grinding's Active Job screen ----------
+  const shortName = n => { const t = String(n || "").trim(); return t.includes("@") ? t.split("@")[0] : t; };
+  const kpText = job => {
+    const kp = typeof getCleanKpNumber === "function" ? getCleanKpNumber(job.kpNumber) : job.kpNumber;
+    const jc = typeof getJobJcNo === "function" ? getJobJcNo(job) : (job.jcNo || "");
+    return (jc ? `${kp} (${jc})` : kp).replace(/\s+/g, " ").trim();
+  };
+
+  // Right-hand "Active Grinding Cycles" cards: "Machine: X" → "X · Operator" (like Machining)
+  function decorateGrindingActiveCards() {
+    const box = $("grinding-active-job-cards-container");
+    if (!box) return;
+    const pool = allJobs().filter(j => j.currentDepartment === "Grinding" && j.grinding &&
+                                      (j.grinding.status === "In Progress" || j.grinding.status === "Hold"));
+    const used = new Set();
+    box.querySelectorAll(".active-card").forEach(card => {
+      const kpEl = card.querySelector(".card-kp"), info = card.querySelector(".card-op-info");
+      if (!kpEl || !info) return;
+      const label = kpEl.textContent.replace(/\s+/g, " ").trim();
+      const job = pool.find(j => !used.has(j) && kpText(j) === label);
+      if (!job) return;
+      used.add(job);
+      const text = `${job.grinding.machineName || "-"} · ${shortName(job.grinding.operatorName) || "-"}`;
+      if (info.textContent !== text) info.textContent = text;
+    });
+  }
+
+  // Left-hand station monitor: add an OPERATOR row under the machine
+  function addGrindingStationOperatorRow() {
+    const machineRow = $("grinding-active-machine");
+    if (!machineRow || $("grinding-active-operator-name")) return;
+    const row = document.createElement("div");
+    row.className = "meta-row";
+    row.innerHTML = `<span class="meta-label">OPERATOR:</span>
+      <span id="grinding-active-operator-name" class="font-bold" style="font-size:18px; color:#facc15;">-</span>`;
+    machineRow.closest(".meta-row").insertAdjacentElement("afterend", row);
+  }
+  function fillGrindingStationOperator() {
+    const el = $("grinding-active-operator-name");
+    if (!el) return;
+    let kp = null;
+    try { kp = selectedGrindingJobKp; } catch (e) {}
+    const job = kp && allJobs().find(j => j.kpNumber === kp);
+    el.textContent = (job && job.grinding && shortName(job.grinding.operatorName)) || "-";
+  }
+
+  function decorateGrinding() {
+    try { decorateGrindingActiveCards(); fillGrindingStationOperator(); } catch (e) { console.warn("[Operator Choice] grinding display:", e); }
+  }
+
   function installHooks() {
+    // Grinding redraws its Active Job screen outside the main render too (card clicks, timers)
+    const box = $("grinding-active-job-cards-container");
+    if (box) {
+      let queued = false;
+      new MutationObserver(() => {
+        if (queued) return;
+        queued = true;
+        setTimeout(() => { queued = false; decorateGrinding(); }, 0);
+      }).observe(box, { childList: true });
+    }
+    const kpEl = $("grinding-active-kp-no");
+    if (kpEl) new MutationObserver(() => fillGrindingStationOperator()).observe(kpEl, { childList: true, characterData: true, subtree: true });
+
     if (typeof window.executeRenderAll === "function") {
       const orig = window.executeRenderAll;
       window.executeRenderAll = function () {
         const r = orig.apply(this, arguments);
         try { clearAutoNamesOnce(); } catch (e) {}
+        decorateGrinding();
         return r;
       };
     }
@@ -141,6 +205,7 @@
   try {
     disableAutoAssignment();
     addGrindingOperatorField();
+    addGrindingStationOperatorRow();
     useChosenGrindingOperator();
     installHooks();
     console.log("[PSP] operator-choice v" + MODULE_VERSION + " loaded.");
