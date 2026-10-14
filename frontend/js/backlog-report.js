@@ -7,10 +7,10 @@
 (function () {
   if (!window.PSP) { console.error("[PSP] backlog-report: psp-common.js must load first."); return; }
   const { $, esc, opts, allJobs, user, isReadOnly, fmt, kpLabel, qtyLabel, stageKeyOf } = window.PSP;
-  const MODULE_VERSION = 3;
+  const MODULE_VERSION = 4;
 
   // ===================== BACKLOG REPORT (all departments) =====================
-  const BACKLOG_STAGES = ["Inspection", "Machining", "Masking", "Spraying", "Grinding", "Polishing", "Final Inspection", "Dispatch"];
+  const BACKLOG_STAGES = ["Inspection", "Machining", "Masking", "Spraying", "Sealing", "Grinding", "Polishing", "Final Inspection", "Dispatch"];
   let backlogFilter = { dept: "", status: "", search: "" };
 
   function injectBacklogTab() {
