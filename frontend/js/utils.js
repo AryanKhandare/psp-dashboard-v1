@@ -1,4 +1,3 @@
-
 /**
  * Returns urgency level: "normal" | "warning" | "critical" | "unknown"
  */
@@ -477,6 +476,7 @@ const parserWorkerCode = `
       const records = rows.map(row => {
         const cols = row.c || [];
         
+        const __ymd = dt => dt.getFullYear() + "-" + String(dt.getMonth() + 1).padStart(2, "0") + "-" + String(dt.getDate()).padStart(2, "0");
         const cleanDate = (col) => {
           if (!col) return "";
           let val = col.v;
@@ -497,14 +497,20 @@ const parserWorkerCode = `
                 // GViz months are 0-indexed
                 const d = new Date(parts[0], parts[1], parts[2]);
                 if (!isNaN(d.getTime())) {
-                  return d.toISOString().split('T')[0];
+                  return __ymd(d);
                 }
               }
             } catch(e) {}
           }
+          // Indian dates are day-first: 11/10/2026 = 11 Oct 2026
+          const __dmy = strVal.match(/^([0-9]{1,2})[/.-]([0-9]{1,2})[/.-]([0-9]{4})/);
+          if (__dmy) {
+            const dd = new Date(Number(__dmy[3]), Number(__dmy[2]) - 1, Number(__dmy[1]));
+            if (!isNaN(dd.getTime())) return __ymd(dd);
+          }
           const d = new Date(strVal);
           if (!isNaN(d.getTime())) {
-            return d.toISOString().split('T')[0];
+            return __ymd(d);
           }
           return strVal;
         };
