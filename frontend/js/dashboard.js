@@ -1,4 +1,3 @@
-
 // ── TAT (Turn Around Time) Tracking Utilities ──────────────────────────────
 const _tatAlertedJobs = new Set(); // Session-level: prevents repeated red-alert toasts
 
@@ -1443,6 +1442,8 @@ function renderUserRows(users) {
       { val: "Grinding", label: "Grinding" },
       { val: "Polishing", label: "Polishing" },
       { val: "Inspection", label: "Inspection" },
+      { val: "Machining", label: "Machining" },
+      { val: "Sealing", label: "Sealing" },
       { val: "All", label: "All Departments" }
     ];
     let deptSelectHtml = `<select id="user-dept-select-${user.uid}" class="form-input select-sm" ${isSelf ? 'disabled' : ''} style="height:32px; padding:2px 5px; font-size:12px; min-width:120px;">`;
@@ -2588,6 +2589,8 @@ function renderDmdDashboard() {
           { val: "Grinding", label: "Grinding" },
           { val: "Polishing", label: "Polishing" },
           { val: "Inspection", label: "Inspection" },
+          { val: "Machining", label: "Machining" },
+          { val: "Sealing", label: "Sealing" },
           { val: "All", label: "All Departments" }
         ];
         let deptSelectHtml = `<select id="dmd-user-dept-select-${user.uid}" class="form-input select-sm" ${isSelf ? 'disabled' : ''} style="height:32px; padding:2px 5px; font-size:12px;">`;
@@ -2657,8 +2660,10 @@ function openCrudModal(entity, action) {
         <div class="form-group"><label>Initial Stage *</label>
           <select id="crud-job-stage" class="form-input">
             <option value="Inspection">Inspection</option>
+            <option value="Machining">Machining</option>
             <option value="Masking">Masking</option>
             <option value="Spraying">Spraying</option>
+            <option value="Sealing">Sealing</option>
             <option value="Grinding">Grinding</option>
             <option value="Polishing">Polishing</option>
           </select>
@@ -2840,8 +2845,10 @@ window.loadCrudJobDetails = function(kp) {
       <div class="form-group"><label>Stage *</label>
         <select id="crud-job-stage" class="form-input">
           <option value="Inspection" ${job.currentDepartment === 'Inspection' ? 'selected' : ''}>Inspection</option>
+          <option value="Machining" ${job.currentDepartment === 'Machining' ? 'selected' : ''}>Machining</option>
           <option value="Masking" ${job.currentDepartment === 'Masking' ? 'selected' : ''}>Masking</option>
           <option value="Spraying" ${job.currentDepartment === 'Spraying' ? 'selected' : ''}>Spraying</option>
+          <option value="Sealing" ${job.currentDepartment === 'Sealing' ? 'selected' : ''}>Sealing</option>
           <option value="Grinding" ${job.currentDepartment === 'Grinding' ? 'selected' : ''}>Grinding</option>
           <option value="Polishing" ${job.currentDepartment === 'Polishing' ? 'selected' : ''}>Polishing</option>
           <option value="Final Inspection" ${job.currentDepartment === 'Final Inspection' ? 'selected' : ''}>Final Inspection</option>
