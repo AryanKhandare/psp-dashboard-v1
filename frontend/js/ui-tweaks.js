@@ -7,7 +7,7 @@
 (function () {
   if (!window.PSP) { console.error("[PSP] ui-tweaks: psp-common.js must load first."); return; }
   const { $, esc, opts, allJobs, user, isReadOnly, fmt, kpLabel, qtyLabel, stageKeyOf } = window.PSP;
-  const MODULE_VERSION = 7;
+  const MODULE_VERSION = 8;
 
   const STAGE = "Machining";
 
@@ -224,6 +224,53 @@
     document.head.appendChild(st);
   }
 
+  // "Select Next Stage" screen had no way back. Add a Cancel button, Esc key and the phone Back button.
+  // Cancelling closes the screen and leaves the job exactly where it was (nothing is saved).
+  function addNextStageCancel() {
+    const overlay = $("transition-drag-overlay");
+    if (!overlay || $("psp-transition-cancel")) return;
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.id = "psp-transition-cancel";
+    btn.textContent = "✕ Cancel";
+    btn.setAttribute("aria-label", "Cancel and keep the job in its current stage");
+    btn.style.cssText = "position:absolute; top:14px; right:16px; z-index:2; padding:8px 16px; border-radius:6px; " +
+      "border:1px solid rgba(255,255,255,0.35); background:rgba(15,23,42,0.85); color:#fff; font-weight:700; " +
+      "font-size:14px; cursor:pointer;";
+    overlay.appendChild(btn);
+
+    const isOpen = () => overlay.style.display && overlay.style.display !== "none";
+    let historyPushed = false, ignoreNextPop = false;
+
+    function cancel(fromBack) {
+      if (!isOpen()) return;
+      overlay.style.display = "none";
+      window.pendingTransition = null;
+      document.querySelectorAll(".drop-target-stage.drag-active").forEach(z => z.classList.remove("drag-active"));
+      if (historyPushed && !fromBack) { ignoreNextPop = true; history.back(); }
+      historyPushed = false;
+      try { if (typeof renderAll === "function") renderAll(); } catch (e) {}
+    }
+    btn.addEventListener("click", () => cancel(false));
+    document.addEventListener("keydown", e => { if (e.key === "Escape" && isOpen()) cancel(false); });
+
+    // Phone Back button: add a history step while the screen is open, and close it on Back
+    new MutationObserver(() => {
+      if (isOpen() && !historyPushed) {
+        try { history.pushState({ pspStageScreen: 1 }, "", location.href); historyPushed = true; } catch (e) {}
+      } else if (!isOpen() && historyPushed) {
+        // closed by choosing a stage: remove the extra history step quietly
+        historyPushed = false; ignoreNextPop = true;
+        try { history.back(); } catch (e) {}
+      }
+    }).observe(overlay, { attributes: true, attributeFilter: ["style"] });
+    window.addEventListener("popstate", () => {
+      if (ignoreNextPop) { ignoreNextPop = false; return; }
+      if (isOpen()) { historyPushed = false; cancel(true); }
+    });
+  }
+
   function limitSprayingLockToOperators() {
     let raw = !!window.sprayingJobActive;
     const isSprayingOperator = () => {
@@ -251,6 +298,7 @@
     fixNextStageLayoutOnPhones();
     makeDispatchCloseWork();
     fixMobileHeight();
+    addNextStageCancel();
     installRenderHook();
     console.log("[PSP] ui-tweaks v" + MODULE_VERSION + " loaded.");
   } catch (err) {
