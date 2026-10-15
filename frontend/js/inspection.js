@@ -716,6 +716,8 @@ function renderMaskingDashboard() {
     renderHoldManagementPanel();
   } else if (activeMaskingSubtab === "masking-subtab-materials") {
     renderMaterialConsumption();
+  } else if (activeMaskingSubtab === "masking-subtab-history") {
+    renderJobHistory();
   } else if (activeMaskingSubtab === "masking-subtab-supervisor") {
     renderOperatorRegistry();
     renderCycleChronology();
