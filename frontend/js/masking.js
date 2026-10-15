@@ -1057,7 +1057,7 @@ function renderJobHistory() {
   completedJobs.sort((a, b) => String(b.masking.endTime || "").localeCompare(String(a.masking.endTime || "")));
 
   if (completedJobs.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="11" class="text-center text-muted">No completed jobs found in the logs.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="10" class="text-center text-muted">No completed jobs found in the logs.</td></tr>`;
     return;
   }
 
@@ -1083,8 +1083,7 @@ function renderJobHistory() {
       <td class="font-mono">${job.quantity}</td>
       <td>${job.masking.operatorName}</td>
       <td class="font-mono">${job.masking.shift}</td>
-      <td class="font-mono text-xs">${startStr}</td>
-      <td class="font-mono text-xs">${endStr}</td>
+      <td class="font-mono text-xs" style="white-space:nowrap;">${endStr}</td>
       <td class="font-mono text-cyan">${durStr}</td>
       <td class="text-muted text-xs">${matCell}</td>
       <td><span class="badge badge-completed">Completed</span></td>
