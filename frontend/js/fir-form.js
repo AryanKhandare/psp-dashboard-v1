@@ -15,7 +15,7 @@
 (function () {
   if (!window.PSP) { console.error("[PSP] fir-form: psp-common.js must load first."); return; }
   const { $, esc, opts, allJobs, user } = window.PSP;
-  const MODULE_VERSION = 4;
+  const MODULE_VERSION = 5;
 
   // ===================== CONFIG =====================
   const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzMXoqOSbxHnedhNpf_8XFAJ1UCLHHnwtDPqx_05gjU3rcb9U1mmlRfd0ma5ulwO3DV/exec";
@@ -297,7 +297,7 @@
     const label = j => { const kp = typeof getCleanKpNumber === "function" ? getCleanKpNumber(j.kpNumber) : j.kpNumber;
                          const jc = typeof getJobJcNo === "function" ? getJobJcNo(j) : (j.jcNo || ""); return (kp + (jc ? ` (${jc})` : "")).trim(); };
     box.querySelectorAll(":scope > .stage-kanban-card").forEach(card => {
-      if (card.querySelector(".fir-planned-row")) return;
+      const old = card.querySelector(".fir-planned-row"); if (old) old.remove();
       const head = card.querySelector(".job-card-header .font-mono");
       const body = card.querySelector(".job-card-body");
       if (!head || !body) return;
@@ -305,12 +305,12 @@
       const job = pool.find(j => !used.has(j) && label(j) === text);
       if (!job) return;
       used.add(job);
-      const d = plannedFor(job);
-      const late = d && d < new Date(new Date().toDateString());
+      const d = window.PSP.plannedFor ? window.PSP.plannedFor(job).fin : plannedFor(job);
+      const late = d && d < new Date();
       const row = document.createElement("div");
       row.className = "job-card-row fir-planned-row";
       row.innerHTML = `<span class="job-card-label">Final Insp. Planned:</span>
-        <span class="job-card-value font-mono" style="white-space:nowrap; ${late ? "color:#ef4444; font-weight:800;" : "font-weight:700;"}" title="${late ? "Final inspection planned date has passed" : ""}">${d ? d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—"}${late ? " (late)" : ""}</span>`;
+        <span class="job-card-value font-mono" style="white-space:nowrap; ${late ? "color:#ef4444; font-weight:800;" : "font-weight:700;"}" title="${late ? "Final inspection planned date has passed" : ""}">${window.PSP.fmtDateTime ? window.PSP.fmtDateTime(d) : (d ? d.toLocaleDateString("en-IN") : "—")}${late ? " (late)" : ""}</span>`;
       body.appendChild(row);
     });
   }
