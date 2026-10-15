@@ -7,7 +7,7 @@
 (function () {
   if (!window.PSP) { console.error("[PSP] ui-tweaks: psp-common.js must load first."); return; }
   const { $, esc, opts, allJobs, user, isReadOnly, fmt, kpLabel, qtyLabel, stageKeyOf } = window.PSP;
-  const MODULE_VERSION = 8;
+  const MODULE_VERSION = 9;
 
   const STAGE = "Machining";
 
@@ -271,6 +271,27 @@
     });
   }
 
+  // JC number for split parts: a split part is "KP-1008-04-R" but the sheet's KP→JC list only knows "KP-1008-04".
+  // Fall back to the KP without the -R suffix, then the parent job's JC, then the JC entered on the job's PIR.
+  function fixSplitJobJc() {
+    if (typeof window.getJobJcNo !== "function") return;
+    const orig = window.getJobJcNo;
+    window.getJobJcNo = function (job) {
+      const found = orig.apply(this, arguments);
+      if (found || !job) return found;
+      const kp = String(job.kpNumber || job.kpNo || "").trim().toUpperCase();
+      const at = kp.indexOf("-R");
+      if (at !== -1) {
+        const parentKp = kp.slice(0, at);
+        if (window.kpToJcMap && window.kpToJcMap[parentKp]) return window.kpToJcMap[parentKp];
+        const parent = allJobs().find(j => String(j.kpNumber || "").toUpperCase() === parentKp);
+        if (parent && parent.jcNo) return parent.jcNo;
+        if (parent && parent.pirReport && parent.pirReport.jcNo) return parent.pirReport.jcNo;
+      }
+      return (job.pirReport && job.pirReport.jcNo) || "";
+    };
+  }
+
   function limitSprayingLockToOperators() {
     let raw = !!window.sprayingJobActive;
     const isSprayingOperator = () => {
@@ -299,6 +320,7 @@
     makeDispatchCloseWork();
     fixMobileHeight();
     addNextStageCancel();
+    fixSplitJobJc();
     installRenderHook();
     console.log("[PSP] ui-tweaks v" + MODULE_VERSION + " loaded.");
   } catch (err) {
