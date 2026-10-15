@@ -9,7 +9,7 @@
 (function () {
   if (!window.PSP) { console.error("[PSP] stage-board: psp-common.js must load first."); return; }
   const { $, esc, opts, allJobs, user, isReadOnly, fmt, kpLabel, qtyLabel, stageKeyOf } = window.PSP;
-  const MODULE_VERSION = 1;
+  const MODULE_VERSION = 2;
 
   let boardDragging = false; // pause board redraws while a card is being dragged
 
@@ -152,8 +152,10 @@
     const db = firebase.firestore();
     const snap = await db.collection("jobs").where("kpNumber", "==", payload.kpNo).get();
     if (snap.empty) throw new Error(`Job ${payload.kpNo} not found`);
-    const ref = snap.docs[0].ref;
-    const data = snap.docs[0].data();
+    // Several documents can share a KP number (e.g. an old deleted copy). Always move the live one.
+    const live = snap.docs.find(d => d.data().isDeleted !== true) || snap.docs[0];
+    const ref = live.ref;
+    const data = live.data();
     const nowIso = new Date().toISOString();
     const target = payload.nextStage;
     const tKey = stageKeyOf(target);
