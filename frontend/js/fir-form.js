@@ -15,14 +15,14 @@
 (function () {
   if (!window.PSP) { console.error("[PSP] fir-form: psp-common.js must load first."); return; }
   const { $, esc, opts, allJobs, user } = window.PSP;
-  const MODULE_VERSION = 1;
+  const MODULE_VERSION = 2;
 
   // ===================== CONFIG =====================
   const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzMXoqOSbxHnedhNpf_8XFAJ1UCLHHnwtDPqx_05gjU3rcb9U1mmlRfd0ma5ulwO3DV/exec";
   const TOKEN = "psp-mes-54f01c5b50486721db971093";
   const STAGE = "Final Inspection";
   const INSPECTORS = ["MF", "JN", "VG", "Laxmi"];
-  const SEND_TO = ["Dispatch", "Polishing", "Grinding", "Sealing", "Spraying", "Masking", "Machining"];
+  const SEND_TO = ["Dispatch", "Outsourcing", "Polishing", "Grinding", "Sealing", "Spraying", "Masking", "Machining"];
   const MAX_PHOTOS = 10;
 
   // ===================== UI =====================
