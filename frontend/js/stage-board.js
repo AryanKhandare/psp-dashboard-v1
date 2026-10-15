@@ -9,7 +9,7 @@
 (function () {
   if (!window.PSP) { console.error("[PSP] stage-board: psp-common.js must load first."); return; }
   const { $, esc, opts, allJobs, user, isReadOnly, fmt, kpLabel, qtyLabel, stageKeyOf } = window.PSP;
-  const MODULE_VERSION = 2;
+  const MODULE_VERSION = 3;
 
   let boardDragging = false; // pause board redraws while a card is being dragged
 
@@ -40,6 +40,19 @@
         <span class="column-title">MACHINING</span><span class="column-count" id="count-machining-stage">0</span></div>
       <div class="kanban-cards-container" id="cards-machining-stage"></div>`;
     firstCol.insertAdjacentElement("afterend", col);
+
+    // Search bar above the board: KP No., JC No. or customer (filters every column)
+    if (!$("board-search")) {
+      const bar = document.createElement("div");
+      bar.style.cssText = "display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin:0 0 12px;";
+      bar.innerHTML = `<input type="search" id="board-search" class="form-input" style="flex:1; min-width:220px; height:40px; font-size:14px;"
+          placeholder="🔍 Search KP No., JC No. or customer name…" aria-label="Search the board by KP No., JC No. or customer" autocomplete="off">
+        <button type="button" id="board-search-clear" class="btn btn-secondary btn-xs" style="height:40px; padding:0 14px;">Clear</button>
+        <span id="board-search-info" class="text-xs text-muted"></span>`;
+      board.parentNode.insertBefore(bar, board);
+      $("board-search").addEventListener("input", () => renderStageBoard());
+      $("board-search-clear").addEventListener("click", () => { $("board-search").value = ""; renderStageBoard(); });
+    }
 
     // Stage names as column titles; switch off the old sub-step drag & drop
     BOARD_COLUMNS.forEach(c => {
@@ -194,16 +207,53 @@
     return (job[key] && job[key].status) || job.status || "Pending";
   }
 
+  // Planned dates from the Q2P sheet: Pre-Inspection Planned (col X) and Final Inspection Planned (col AL)
+  const planDate = v => {
+    if (!v) return null;
+    const d = (v && typeof v.toDate === "function") ? v.toDate() : new Date(String(v).length === 10 ? v + "T00:00:00" : v);
+    return isNaN(d.getTime()) ? null : d;
+  };
+  const planText = d => d ? d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) +
+    ((d.getHours() || d.getMinutes()) ? " " + d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "") : "—";
+  function plannedRows(job, stage) {
+    const startOfToday = new Date(new Date().toDateString());
+    // split parts (KP-xxx-R) take the planned dates of their parent job
+    let src = job;
+    if ((!job.inspectionDate || !job.plannedCompletionDate) && /-R/i.test(job.kpNumber || "")) {
+      const parentKp = String(job.kpNumber).toUpperCase().split("-R")[0];
+      src = allJobs().find(j => String(j.kpNumber || "").toUpperCase() === parentKp) || job;
+    }
+    const pre = planDate(job.inspectionDate || src.inspectionDate), fin = planDate(job.plannedCompletionDate || src.plannedCompletionDate);
+    const preLate = pre && stage === "Inspection" && pre < startOfToday;            // still in Inspection after its pre-inspection plan
+    const finLate = fin && fin < startOfToday;                                       // final inspection plan passed
+    const row = (label, d, late) => `<div style="display:flex; justify-content:space-between; gap:6px; font-size:10.5px; line-height:1.5;">
+        <span class="text-muted">${label}</span>
+        <span class="font-mono" style="${late ? "color:#ef4444; font-weight:800;" : "font-weight:600;"}" title="${late ? "Planned date has passed" : ""}">${planText(d)}</span></div>`;
+    return `<div style="margin-top:6px; padding-top:6px; border-top:1px dashed rgba(148,163,184,0.35);">
+        ${row("Pre Insp. Planned", pre, preLate)}${row("Final Insp. Planned", fin, finLate)}</div>`;
+  }
+
+  function boardMatches(job, q) {
+    if (!q) return true;
+    const jc = (typeof getJobJcNo === "function") ? getJobJcNo(job) : (job.jcNo || "");
+    const clean = (typeof getCleanKpNumber === "function") ? getCleanKpNumber(job.kpNumber) : job.kpNumber;
+    return [job.kpNumber, clean, jc, job.customer, job.partName].some(v => String(v || "").toLowerCase().includes(q));
+  }
+
   function renderStageBoard() {
     if (!$("cards-machining-stage") || boardDragging) return;
     const ro = isReadOnly();
+    const q = String(($("board-search") || {}).value || "").trim().toLowerCase();
+    let shown = 0, total = 0;
     BOARD_COLUMNS.forEach(c => {
       const box = $(c.cards);
       const cnt = $(c.count);
       if (!box) return;
-      const list = allJobs().filter(j => j.currentDepartment === c.stage);
-      if (cnt) cnt.textContent = list.length;
-      if (!list.length) { box.innerHTML = `<div class="text-xs text-muted" style="text-align:center; padding:12px;">No jobs</div>`; return; }
+      const all = allJobs().filter(j => j.currentDepartment === c.stage);
+      const list = all.filter(j => boardMatches(j, q));
+      total += all.length; shown += list.length;
+      if (cnt) cnt.textContent = q ? `${list.length}/${all.length}` : all.length;
+      if (!list.length) { box.innerHTML = `<div class="text-xs text-muted" style="text-align:center; padding:12px;">${q ? "No match" : "No jobs"}</div>`; return; }
       box.innerHTML = list.map(job => {
         const st = stageStatus(job, c.stage);
         const badge = st === "In Progress" ? "background:#3b82f6;" : (st === "Hold" ? "background:#ef4444;" : "background:#f97316;");
@@ -222,6 +272,7 @@
               <span class="kanban-card-qty">${esc(job.quantity || "—")} pcs</span>
               <span style="font-size:10px; font-weight:700; padding:2px 10px; border-radius:4px; color:#fff; ${badge}">${esc(String(st).toUpperCase())}</span>
             </div>
+            ${plannedRows(job, c.stage)}
             <div style="margin-top:8px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.06); display:flex; flex-direction:column; gap:4px;">
               ${action}
               ${c.stage === "Inspection" && typeof buildDeleteJobButtonHTML === "function" ? buildDeleteJobButtonHTML(job.kpNumber) : ""}
@@ -229,6 +280,8 @@
           </div>`;
       }).join("");
     });
+    const info = $("board-search-info");
+    if (info) info.textContent = q ? `${shown} of ${total} jobs match "${q}"` : "";
   }
 
   // ===================== HOOKS =====================
