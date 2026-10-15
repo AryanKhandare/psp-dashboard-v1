@@ -14,9 +14,11 @@
 (function () {
   if (!window.PSP) { console.error("[PSP] outsourcing: psp-common.js must load first."); return; }
   const { $, esc, opts, allJobs, user, isReadOnly, kpLabel, qtyLabel } = window.PSP;
-  const MODULE_VERSION = 1;
+  const MODULE_VERSION = 3;
 
   const STAGE = "Outsourcing";
+  // Inspectors (Inspection-department operators) who may also use the Outsourcing tab, by login name
+  const OUTSOURCING_INSPECTORS = ["MF", "VG", "SJ", "Laxmi", "JN"];
   const RETURN_STAGES = ["Inspection", "Machining", "Masking", "Spraying", "Sealing", "Grinding", "Polishing", "Final Inspection", "Dispatch"];
   const WORK_SUGGESTIONS = ["Machining", "Grinding", "Heat Treatment", "Plating", "Coating", "Welding", "Balancing", "Polishing", "Testing"];
   let activeSubtab = "out-subtab-queue";
@@ -399,6 +401,21 @@
 
   // ===================== HOOKS =====================
   function installHooks() {
+    // Sidebar and page access both use isTabAuthorized: allow the named inspectors for this tab only
+    if (typeof window.isTabAuthorized === "function") {
+      const origAuth = window.isTabAuthorized;
+      window.isTabAuthorized = function (tabId) {
+        if (tabId === "tab-outsourcing") {
+          const u = user();
+          if (u && u.role === "operator") {
+            const dept = typeof getCleanDeptKey === "function" ? getCleanDeptKey(u.department) : u.department;
+            const name = String(u.name || "").trim().toLowerCase();
+            if (dept === "Inspection" && OUTSOURCING_INSPECTORS.some(n => n.toLowerCase() === name)) return true;
+          }
+        }
+        return origAuth.apply(this, arguments);
+      };
+    }
     if (typeof ROLE_PERMISSIONS !== "undefined") {
       ["super_admin", "production_admin", "hr_admin"].forEach(r => {
         const l = ROLE_PERMISSIONS[r];
