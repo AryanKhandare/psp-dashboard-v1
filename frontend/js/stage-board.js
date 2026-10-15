@@ -9,7 +9,7 @@
 (function () {
   if (!window.PSP) { console.error("[PSP] stage-board: psp-common.js must load first."); return; }
   const { $, esc, opts, allJobs, user, isReadOnly, fmt, kpLabel, qtyLabel, stageKeyOf } = window.PSP;
-  const MODULE_VERSION = 3;
+  const MODULE_VERSION = 4;
 
   let boardDragging = false; // pause board redraws while a card is being dragged
 
@@ -215,22 +215,14 @@
   };
   const planText = d => d ? d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) +
     ((d.getHours() || d.getMinutes()) ? " " + d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "") : "—";
+  // Inspection column only: Pre-Inspection Planned (Q2P col X). Final Inspection Planned is shown on the FIR stage cards.
   function plannedRows(job, stage) {
-    const startOfToday = new Date(new Date().toDateString());
-    // split parts (KP-xxx-R) take the planned dates of their parent job
-    let src = job;
-    if ((!job.inspectionDate || !job.plannedCompletionDate) && /-R/i.test(job.kpNumber || "")) {
-      const parentKp = String(job.kpNumber).toUpperCase().split("-R")[0];
-      src = allJobs().find(j => String(j.kpNumber || "").toUpperCase() === parentKp) || job;
-    }
-    const pre = planDate(job.inspectionDate || src.inspectionDate), fin = planDate(job.plannedCompletionDate || src.plannedCompletionDate);
-    const preLate = pre && stage === "Inspection" && pre < startOfToday;            // still in Inspection after its pre-inspection plan
-    const finLate = fin && fin < startOfToday;                                       // final inspection plan passed
-    const row = (label, d, late) => `<div style="display:flex; justify-content:space-between; gap:6px; font-size:10.5px; line-height:1.5;">
-        <span class="text-muted">${label}</span>
-        <span class="font-mono" style="${late ? "color:#ef4444; font-weight:800;" : "font-weight:600;"}" title="${late ? "Planned date has passed" : ""}">${planText(d)}</span></div>`;
-    return `<div style="margin-top:6px; padding-top:6px; border-top:1px dashed rgba(148,163,184,0.35);">
-        ${row("Pre Insp. Planned", pre, preLate)}${row("Final Insp. Planned", fin, finLate)}</div>`;
+    if (stage !== "Inspection") return "";
+    const pre = planDate(job.inspectionDate);
+    const late = pre && pre < new Date(new Date().toDateString());
+    return `<div style="margin-top:6px; padding-top:6px; border-top:1px dashed rgba(148,163,184,0.35); display:flex; justify-content:space-between; align-items:center; gap:6px; font-size:10.5px; white-space:nowrap;">
+        <span class="text-muted">Pre Insp. Planned</span>
+        <span class="font-mono" style="${late ? "color:#ef4444; font-weight:800;" : "font-weight:700;"}" title="${late ? "Pre-inspection planned date has passed" : ""}">${planText(pre)}</span></div>`;
   }
 
   function boardMatches(job, q) {
