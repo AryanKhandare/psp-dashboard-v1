@@ -15,7 +15,7 @@
 (function () {
   if (!window.PSP) { console.error("[PSP] fir-form: psp-common.js must load first."); return; }
   const { $, esc, opts, allJobs, user } = window.PSP;
-  const MODULE_VERSION = 3;
+  const MODULE_VERSION = 4;
 
   // ===================== CONFIG =====================
   const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzMXoqOSbxHnedhNpf_8XFAJ1UCLHHnwtDPqx_05gjU3rcb9U1mmlRfd0ma5ulwO3DV/exec";
@@ -278,8 +278,51 @@
     }
   }
 
+  // ---------- Final Insp. Planned (Q2P col AL) on the Final Inspection stage cards ----------
+  const toDay = v => { if (!v) return null; const d = (v && typeof v.toDate === "function") ? v.toDate() : new Date(String(v).length === 10 ? v + "T00:00:00" : v); return isNaN(d.getTime()) ? null : d; };
+  function plannedFor(job) {
+    if (job.plannedCompletionDate) return toDay(job.plannedCompletionDate);
+    if (/-R/i.test(job.kpNumber || "")) {   // split parts use their parent's date
+      const parentKp = String(job.kpNumber).toUpperCase().split("-R")[0];
+      const parent = allJobs().find(j => String(j.kpNumber || "").toUpperCase() === parentKp);
+      if (parent) return toDay(parent.plannedCompletionDate);
+    }
+    return null;
+  }
+  function decorateFinalCards() {
+    const box = $("final-inspection-queue-cards");
+    if (!box) return;
+    const pool = allJobs().filter(j => j.currentDepartment === STAGE);
+    const used = new Set();
+    const label = j => { const kp = typeof getCleanKpNumber === "function" ? getCleanKpNumber(j.kpNumber) : j.kpNumber;
+                         const jc = typeof getJobJcNo === "function" ? getJobJcNo(j) : (j.jcNo || ""); return (kp + (jc ? ` (${jc})` : "")).trim(); };
+    box.querySelectorAll(":scope > .stage-kanban-card").forEach(card => {
+      if (card.querySelector(".fir-planned-row")) return;
+      const head = card.querySelector(".job-card-header .font-mono");
+      const body = card.querySelector(".job-card-body");
+      if (!head || !body) return;
+      const text = head.textContent.replace(/\s+/g, " ").trim();
+      const job = pool.find(j => !used.has(j) && label(j) === text);
+      if (!job) return;
+      used.add(job);
+      const d = plannedFor(job);
+      const late = d && d < new Date(new Date().toDateString());
+      const row = document.createElement("div");
+      row.className = "job-card-row fir-planned-row";
+      row.innerHTML = `<span class="job-card-label">Final Insp. Planned:</span>
+        <span class="job-card-value font-mono" style="white-space:nowrap; ${late ? "color:#ef4444; font-weight:800;" : "font-weight:700;"}" title="${late ? "Final inspection planned date has passed" : ""}">${d ? d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—"}${late ? " (late)" : ""}</span>`;
+      body.appendChild(row);
+    });
+  }
+
   // ===================== HOOKS =====================
   function installHooks() {
+    const finalBox = $("final-inspection-queue-cards");
+    if (finalBox) {
+      let queued = false;
+      new MutationObserver(() => { if (queued) return; queued = true; setTimeout(() => { queued = false; try { decorateFinalCards(); } catch (e) {} }, 0); })
+        .observe(finalBox, { childList: true });
+    }
     // "Approve QA & Close" buttons and card drags call this by name
     window.triggerFinalInspectionFloatingTransition = function (kpNumber) {
       const job = allJobs().find(j => j.kpNumber === kpNumber);
