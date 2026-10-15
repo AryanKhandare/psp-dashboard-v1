@@ -663,7 +663,14 @@ async function autoSyncJobsFromSpreadsheet(records) {
       const updates = {};
       const newQty = Number(record.quantity) || 1;
 
-      if (newQty !== existingJob.quantity) {
+      // The sheet holds the full order quantity. Only copy it while the job is still in Inspection and has
+      // not been split; after a split (e.g. 5 of 21 moved on) the remaining quantity here is the correct one.
+      const kpUpper = String(kpNo).toUpperCase();
+      const hasBeenSplit = !!existingJob.splitRemark ||
+        (Array.isArray(jobs) && jobs.some(j => String(j.kpNumber || "").toUpperCase().startsWith(kpUpper + "-R")));
+      const qtyFromSheetAllowed = (existingJob.currentDepartment || "Inspection") === "Inspection" && !hasBeenSplit;
+
+      if (newQty !== existingJob.quantity && qtyFromSheetAllowed) {
         console.log(`[Auto-Sync] Job ${kpNo} quantity mismatch: local=${existingJob.quantity}, sheet=${newQty}. Updating...`);
         existingJob.quantity = newQty;
         updates.quantity = newQty;
