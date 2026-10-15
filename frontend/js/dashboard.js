@@ -287,8 +287,10 @@ async function sendBackendPost(payload) {
     if (payload.kpNo && payload.kpNo !== "N/A") {
       const snap = await db.collection("jobs").where("kpNumber", "==", payload.kpNo).get();
       if (!snap.empty) {
-        jobRef = snap.docs[0].ref;
-        jobData = snap.docs[0].data();
+        // Several documents can share a KP number (e.g. an old deleted copy). Always use the live one.
+        const liveDoc = snap.docs.find(d => d.data().isDeleted !== true) || snap.docs[0];
+        jobRef = liveDoc.ref;
+        jobData = liveDoc.data();
       }
     }
     
