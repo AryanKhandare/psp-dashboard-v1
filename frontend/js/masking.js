@@ -1044,15 +1044,17 @@ function renderJobHistory() {
 
   // History contains completed jobs or jobs that have progressed past masking
   const completedJobs = jobs.filter(j => {
-    if (j.masking.status !== "Completed") return false;
+    if (!j || !j.masking || j.masking.status !== "Completed") return false;
 
-    if (histKp && !j.kpNumber.toLowerCase().includes(histKp)) return false;
-    if (histCust && !j.customer.toLowerCase().includes(histCust)) return false;
-    if (histOp && !j.masking.operatorName.toLowerCase().includes(histOp)) return false;
+    if (histKp && !String(j.kpNumber || "").toLowerCase().includes(histKp)) return false;
+    if (histCust && !String(j.customer || "").toLowerCase().includes(histCust)) return false;
+    if (histOp && !String(j.masking.operatorName || "").toLowerCase().includes(histOp)) return false;
     if (histProc && j.processType !== histProc) return false;
 
     return true;
   });
+
+  completedJobs.sort((a, b) => String(b.masking.endTime || "").localeCompare(String(a.masking.endTime || "")));
 
   if (completedJobs.length === 0) {
     tbody.innerHTML = `<tr><td colspan="11" class="text-center text-muted">No completed jobs found in the logs.</td></tr>`;
@@ -1060,15 +1062,18 @@ function renderJobHistory() {
   }
 
   completedJobs.forEach(job => {
+   try {
     const tr = document.createElement("tr");
 
     // Format start/end times
-    const startStr = job.masking.startTime ? new Date(job.masking.startTime).toLocaleTimeString() : "--:--:--";
-    const endStr = job.masking.endTime ? new Date(job.masking.endTime).toLocaleTimeString() : "--:--:--";
-    const durStr = formatDuration(job.masking.durationMs);
+    // Date + time (e.g. 15 Oct 2026, 10:21 am)
+    const fmtDT = v => { const d = v ? new Date(v) : null; return (d && !isNaN(d.getTime())) ? d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) + " " + d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "—"; };
+    const startStr = fmtDT(job.masking.startTime);
+    const endStr = fmtDT(job.masking.endTime);
+    const durStr = formatDuration(job.masking.durationMs || job.masking.activeTimeMs || 0);
 
     // Format material quantities
-    const matStrings = job.masking.materials.map(m => `${m.name}: ${m.actualQty} ${m.unit}`);
+    const matStrings = (Array.isArray(job.masking.materials) ? job.masking.materials : []).map(m => `${m.name}: ${m.actualQty} ${m.unit}`);
     const matCell = matStrings.length > 0 ? matStrings.join("<br>") : "None";
 
     tr.innerHTML = `
@@ -1085,6 +1090,7 @@ function renderJobHistory() {
       <td><span class="badge badge-completed">Completed</span></td>
     `;
     tbody.appendChild(tr);
+   } catch (e) { console.warn("[Masking history] skipped a record:", job && job.kpNumber, e); }
   });
 }
 
