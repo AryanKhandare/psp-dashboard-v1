@@ -15,7 +15,7 @@
 (function () {
   if (!window.PSP) { console.error("[PSP] pir-form: psp-common.js must load first."); return; }
   const { $, esc, opts, allJobs, user } = window.PSP;
-  const MODULE_VERSION = 3;
+  const MODULE_VERSION = 4;
 
   // ===================== CONFIG =====================
   // The MES Stage Sync Apps Script (it also handles PIRs: PIR_Reports tab + photos in Drive).
@@ -82,22 +82,21 @@
               ${field("pir-process", "1. Process", true, inp("pir-process", "text", true, 'readonly value="Pre Inspection"'))}
               ${field("pir-kp", "2. KP No.", true, inp("pir-kp", "text", true, "readonly"))}
               ${field("pir-no", "3. PIR No.", true, inp("pir-no", "text", true, 'placeholder="Enter PIR number"'))}
-              ${field("pir-premach", "4. Pre Machining Required", true, sel("pir-premach", ["Yes", "No"], true))}
-              ${field("pir-jc", "5. JC No.", true, inp("pir-jc", "text", true))}
-              ${field("pir-part", "6. Part Name", true, inp("pir-part", "text", true))}
-              ${field("pir-dia", "7. Coating Dia (mm)", true, inp("pir-dia", "number", true, 'step="any" min="0" inputmode="decimal"'))}
-              ${field("pir-clen", "8. Coating Length (mm)", true, inp("pir-clen", "number", true, 'step="any" min="0" inputmode="decimal"'))}
-              ${field("pir-tlen", "9. Total Length (mm)", true, inp("pir-tlen", "number", true, 'step="any" min="0" inputmode="decimal"'))}
-              ${field("pir-ptype", "10. Part Type", true, sel("pir-ptype", PART_TYPES, true))}
-              ${field("pir-qty", "11. Qty", false, inp("pir-qty", "number", false, 'min="1" step="1" inputmode="numeric"'))}
-              ${field("pir-inspector", "12. Inspector Name", true, sel("pir-inspector", INSPECTORS, true))}
-              ${field("pir-status", "14. Status", true, sel("pir-status", STATUSES, true))}
-              ${field("pir-outsourcing", "15. Outsourcing", true, sel("pir-outsourcing", ["Outsourcing Yes", "Outsourcing No"], true))}
-              ${field("pir-pcode", "16. Process Code", true, inp("pir-pcode", "text", true))}
-              ${field("pir-processes", "17. Processes", true, sel("pir-processes", PROCESSES, true))}
-              ${field("pir-next", "18. Next Stage", true, sel("pir-next", NEXT_STAGES, true), true)}
+              ${field("pir-jc", "4. JC No.", true, inp("pir-jc", "text", true))}
+              ${field("pir-part", "5. Part Name", true, inp("pir-part", "text", true))}
+              ${field("pir-dia", "6. Coating Dia (mm)", true, inp("pir-dia", "number", true, 'step="any" min="0" inputmode="decimal"'))}
+              ${field("pir-clen", "7. Coating Length (mm)", true, inp("pir-clen", "number", true, 'step="any" min="0" inputmode="decimal"'))}
+              ${field("pir-tlen", "8. Total Length (mm)", true, inp("pir-tlen", "number", true, 'step="any" min="0" inputmode="decimal"'))}
+              ${field("pir-ptype", "9. Part Type", true, sel("pir-ptype", PART_TYPES, true))}
+              ${field("pir-qty", "10. Qty", false, inp("pir-qty", "number", false, 'min="1" step="1" inputmode="numeric"'))}
+              ${field("pir-inspector", "11. Inspector Name", true, sel("pir-inspector", INSPECTORS, true))}
+              ${field("pir-status", "13. Status", true, sel("pir-status", STATUSES, true))}
+              ${field("pir-outsourcing", "14. Outsourcing", true, sel("pir-outsourcing", ["Outsourcing Yes", "Outsourcing No"], true))}
+              ${field("pir-pcode", "15. Process Code", true, inp("pir-pcode", "text", true))}
+              ${field("pir-processes", "16. Processes", true, sel("pir-processes", PROCESSES, true))}
+              ${field("pir-next", "17. Next Stage", true, sel("pir-next", NEXT_STAGES, true), true)}
               <div class="pir-field pir-wide">
-                <label for="pir-photos">13. Job Photos <span style="font-weight:400; opacity:.75;">(you can add several, up to ${MAX_PHOTOS})</span></label>
+                <label for="pir-photos">12. Job Photos <span style="font-weight:400; opacity:.75;">(you can add several, up to ${MAX_PHOTOS})</span></label>
                 <input id="pir-photos" type="file" accept="image/*" multiple class="form-input" style="height:auto; padding:8px;">
                 <div id="pir-photo-list" class="pir-photos"></div>
               </div>
@@ -139,7 +138,7 @@
     $("pir-part").value = job.partName || "";
     $("pir-qty").value = job.quantity || "";
     ["pir-no", "pir-dia", "pir-clen", "pir-tlen", "pir-pcode"].forEach(id => { $(id).value = ""; });
-    ["pir-premach", "pir-ptype", "pir-status", "pir-outsourcing"].forEach(id => { $(id).value = ""; });
+    ["pir-ptype", "pir-status", "pir-outsourcing"].forEach(id => { $(id).value = ""; });
     const known = PROCESSES.find(p => p.toLowerCase() === String(job.processType || "").toLowerCase());
     $("pir-processes").value = known || "";
     const u = user();
@@ -214,7 +213,7 @@
   function readForm() {
     const v = id => String($(id).value || "").trim();
     return {
-      process: "Pre Inspection", kpNo: v("pir-kp"), pirNo: v("pir-no"), preMachiningRequired: v("pir-premach"),
+      process: "Pre Inspection", kpNo: v("pir-kp"), pirNo: v("pir-no"),
       jcNo: v("pir-jc"), partName: v("pir-part"), coatingDiaMm: v("pir-dia"), coatingLengthMm: v("pir-clen"),
       totalLengthMm: v("pir-tlen"), partType: v("pir-ptype"), qty: v("pir-qty"), inspectorName: v("pir-inspector"),
       status: v("pir-status"), outsourcing: v("pir-outsourcing"), processCode: v("pir-pcode"),
