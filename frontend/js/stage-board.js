@@ -9,7 +9,7 @@
 (function () {
   if (!window.PSP) { console.error("[PSP] stage-board: psp-common.js must load first."); return; }
   const { $, esc, opts, allJobs, user, isReadOnly, fmt, kpLabel, qtyLabel, stageKeyOf } = window.PSP;
-  const MODULE_VERSION = 4;
+  const MODULE_VERSION = 5;
 
   let boardDragging = false; // pause board redraws while a card is being dragged
 
@@ -218,11 +218,11 @@
   // Inspection column only: Pre-Inspection Planned (Q2P col X). Final Inspection Planned is shown on the FIR stage cards.
   function plannedRows(job, stage) {
     if (stage !== "Inspection") return "";
-    const pre = planDate(job.inspectionDate);
-    const late = pre && pre < new Date(new Date().toDateString());
-    return `<div style="margin-top:6px; padding-top:6px; border-top:1px dashed rgba(148,163,184,0.35); display:flex; justify-content:space-between; align-items:center; gap:6px; font-size:10.5px; white-space:nowrap;">
-        <span class="text-muted">Pre Insp. Planned</span>
-        <span class="font-mono" style="${late ? "color:#ef4444; font-weight:800;" : "font-weight:700;"}" title="${late ? "Pre-inspection planned date has passed" : ""}">${planText(pre)}</span></div>`;
+    const pre = (window.PSP.plannedFor ? window.PSP.plannedFor(job).pre : planDate(job.inspectionDate));
+    const late = pre && pre < new Date();
+    return `<div style="margin-top:6px; padding-top:6px; border-top:1px dashed rgba(148,163,184,0.35); font-size:10.5px; line-height:1.4;">
+        <div class="text-muted">Pre Insp. Planned</div>
+        <div class="font-mono" style="white-space:nowrap; ${late ? "color:#ef4444; font-weight:800;" : "font-weight:700;"}" title="${late ? "Pre-inspection planned time has passed" : ""}">${window.PSP.fmtDateTime ? window.PSP.fmtDateTime(pre) : planText(pre)}</div></div>`;
   }
 
   function boardMatches(job, q) {
