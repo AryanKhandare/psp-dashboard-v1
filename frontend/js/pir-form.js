@@ -15,7 +15,7 @@
 (function () {
   if (!window.PSP) { console.error("[PSP] pir-form: psp-common.js must load first."); return; }
   const { $, esc, opts, allJobs, user } = window.PSP;
-  const MODULE_VERSION = 2;
+  const MODULE_VERSION = 3;
 
   // ===================== CONFIG =====================
   // The MES Stage Sync Apps Script (it also handles PIRs: PIR_Reports tab + photos in Drive).
@@ -27,7 +27,7 @@
   const PART_TYPES = ["Cylindrical", "Rectangle"];
   const STATUSES = ["OK", "Not OK - Reported to Team Leader"];
   const PROCESSES = ["HVOF", "HAVF", "Flame Spray", "Arc Spray", "Plasma", "Rokide Gun Spray", "Arco Process", "Blank PIR"];
-  const NEXT_STAGES = ["Masking", "Machining", "Spraying", "Grinding", "Polishing", "Blank PIR/Quarantine"];
+  const NEXT_STAGES = ["Masking", "Machining", "Spraying", "Grinding", "Polishing", "Outsourcing", "Blank PIR/Quarantine"];
   const QUARANTINE = "Blank PIR/Quarantine";
   const FROM_STAGE = "Inspection";
   const MAX_PHOTOS = 10;
@@ -354,6 +354,10 @@
     $("psp-pir-form").addEventListener("submit", submitPIR);
     $("psp-pir-cancel").addEventListener("click", cancelPIR);
     $("pir-next").addEventListener("change", updateSubmitLabel);
+    // "Outsourcing Yes" suggests Outsourcing as the next stage (still changeable)
+    $("pir-outsourcing").addEventListener("change", () => {
+      if ($("pir-outsourcing").value === "Outsourcing Yes" && !$("pir-next").value) { $("pir-next").value = "Outsourcing"; updateSubmitLabel(); }
+    });
     $("pir-photos").addEventListener("change", e => addPhotos(e.target.files));
     $("pir-photo-list").addEventListener("click", e => {
       const b = e.target.closest("[data-pir-del]");
