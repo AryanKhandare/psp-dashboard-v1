@@ -9,7 +9,7 @@
 (function () {
   if (!window.PSP) { console.error("[PSP] stage-board: psp-common.js must load first."); return; }
   const { $, esc, opts, allJobs, user, isReadOnly, fmt, kpLabel, qtyLabel, stageKeyOf } = window.PSP;
-  const MODULE_VERSION = 5;
+  const MODULE_VERSION = 6;
 
   let boardDragging = false; // pause board redraws while a card is being dragged
 
@@ -21,15 +21,22 @@
     { stage: "Machining",  tab: "machining",  cards: "cards-machining-stage",  count: "count-machining-stage" },
     { stage: "Masking",    tab: "masking",    cards: "cards-visual",           count: "count-visual" },
     { stage: "Spraying",   tab: "spraying",   cards: "cards-dimensional",      count: "count-dimensional" },
+    { stage: "Sealing",    tab: "sealing",    cards: "cards-sealing-stage",    count: "count-sealing-stage",  extra: { after: "cards-dimensional", color: "#0d9488" } },
     { stage: "Grinding",   tab: "grinding",   cards: "cards-review",           count: "count-review" },
-    { stage: "Polishing",  tab: "polishing",  cards: "cards-ready",            count: "count-ready" }
+    { stage: "Polishing",  tab: "polishing",  cards: "cards-ready",            count: "count-ready" },
+    { stage: "Final Inspection", tab: "final-inspection", cards: "cards-final-stage", count: "count-final-stage", extra: { after: "cards-ready", color: "#0ea5e9" } },
+    { stage: "Dispatch",   tab: "dispatch",   cards: "cards-dispatch-stage",   count: "count-dispatch-stage", extra: { after: "cards-final-stage", color: "#22c55e" } },
+    { stage: "Outsourcing", tab: "outsourcing", cards: "cards-outsourcing-stage", count: "count-outsourcing-stage", extra: { after: "cards-dispatch-stage", color: "#a855f7" } }
   ];
 
   function setupStageBoard() {
     const board = document.querySelector(".inspection-kanban-board");
     const first = $("cards-intake");
     if (!board || !first || $("cards-machining-stage")) return;
-    board.style.gridTemplateColumns = "repeat(6, minmax(0, 1fr))";
+    // 10 stages: each column keeps a readable width; the board scrolls sideways on smaller screens
+    board.style.gridTemplateColumns = `repeat(${BOARD_COLUMNS.length}, minmax(210px, 1fr))`;
+    board.style.overflowX = "auto";
+    board.style.paddingBottom = "8px";
 
     // Insert the MACHINING column right after INSPECTION
     const firstCol = first.closest(".kanban-column");
@@ -40,6 +47,19 @@
         <span class="column-title">MACHINING</span><span class="column-count" id="count-machining-stage">0</span></div>
       <div class="kanban-cards-container" id="cards-machining-stage"></div>`;
     firstCol.insertAdjacentElement("afterend", col);
+
+    // Insert SEALING, FINAL INSPECTION, DISPATCH and OUTSOURCING columns in stage order
+    BOARD_COLUMNS.filter(c => c.extra).forEach(c => {
+      const prev = $(c.extra.after);
+      if (!prev || $(c.cards)) return;
+      const ec = document.createElement("div");
+      ec.className = "kanban-column";
+      ec.setAttribute("data-status", c.stage);
+      ec.innerHTML = `<div class="kanban-column-header" style="border-color:${c.extra.color};">
+          <span class="column-title">${esc(c.stage.toUpperCase())}</span><span class="column-count" id="${c.count}">0</span></div>
+        <div class="kanban-cards-container" id="${c.cards}"></div>`;
+      prev.closest(".kanban-column").insertAdjacentElement("afterend", ec);
+    });
 
     // Search bar above the board: KP No., JC No. or customer (filters every column)
     if (!$("board-search")) {
