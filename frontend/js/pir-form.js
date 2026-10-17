@@ -15,7 +15,7 @@
 (function () {
   if (!window.PSP) { console.error("[PSP] pir-form: psp-common.js must load first."); return; }
   const { $, esc, opts, allJobs, user } = window.PSP;
-  const MODULE_VERSION = 4;
+  const MODULE_VERSION = 5;
 
   // ===================== CONFIG =====================
   // The MES Stage Sync Apps Script (it also handles PIRs: PIR_Reports tab + photos in Drive).
@@ -55,6 +55,9 @@
         background:#ef4444; color:#fff; font-weight:800; cursor:pointer; line-height:22px; padding:0; }
       #psp-pir-modal .pir-foot { padding:10px 16px; border-top:1px solid var(--border-color,#cbd5e1); display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end; align-items:center; }
       #psp-pir-modal .pir-msg { flex:1; font-size:12px; font-weight:600; min-width:180px; }
+      /* tablets/phones: fit the visible screen (100vh hides the Submit button behind the browser bars) */
+      @supports (height: 100dvh) { #psp-pir-modal .pir-box { height:calc(100dvh - 20px); max-height:calc(100dvh - 20px); } }
+      #psp-pir-modal .pir-foot { flex-shrink:0; padding-bottom:calc(10px + env(safe-area-inset-bottom, 0px)); }
       @media (max-width: 640px) { #psp-pir-modal .pir-grid { grid-template-columns:1fr; } #psp-pir-modal { padding:0; }
         #psp-pir-modal .pir-box { max-height:100dvh; height:100dvh; border-radius:0; } }`;
     document.head.appendChild(st);
