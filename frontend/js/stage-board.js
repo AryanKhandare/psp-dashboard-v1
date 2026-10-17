@@ -9,7 +9,7 @@
 (function () {
   if (!window.PSP) { console.error("[PSP] stage-board: psp-common.js must load first."); return; }
   const { $, esc, opts, allJobs, user, isReadOnly, fmt, kpLabel, qtyLabel, stageKeyOf } = window.PSP;
-  const MODULE_VERSION = 6;
+  const MODULE_VERSION = 7;
 
   let boardDragging = false; // pause board redraws while a card is being dragged
 
@@ -125,12 +125,83 @@
     });
 
     board.addEventListener("click", e => {
+      if (!e.target.closest("button, a, input, select")) {
+        const card = e.target.closest("[data-board-kp]");
+        if (card) { openJobInStage(card.getAttribute("data-board-kp")); return; }
+      }
       const push = e.target.closest("[data-board-push]");
       const open = e.target.closest("[data-board-open]");
       if (push && typeof triggerInspectionFloatingTransition === "function") triggerInspectionFloatingTransition(push.getAttribute("data-board-push"));
       if (open) window.location.hash = "#/" + open.getAttribute("data-board-open");
     });
   }
+
+  // ---------- Click a board card → go to that job in its stage ----------
+  const STAGE_VIEWS = {
+    "Machining":        { hash: "machining",        sub: '#tab-machining [data-subtab="machining-subtab-queue"]', filter: "machining-filter-kp", box: "machining-queue-cards" },
+    "Masking":          { hash: "masking",          sub: '[data-subtab="masking-subtab-queue"]',                   filter: "filter-kp",           box: "masking-queue-cards" },
+    "Spraying":         { hash: "spraying",         sub: '[data-subtab="spraying-subtab-queue"]',                  filter: "spraying-filter-kp",  box: "spraying-queue-cards" },
+    "Sealing":          { hash: "sealing",          sub: '#tab-sealing [data-subtab="sealing-subtab-queue"]',      filter: "sealing-filter-kp",   box: "sealing-queue-cards" },
+    "Grinding":         { hash: "grinding",         sub: '[data-subtab="grinding-subtab-queue"]',                  filter: "grinding-filter-kp",  box: "grinding-queue-cards" },
+    "Polishing":        { hash: "polishing",        sub: '#tab-polishing [data-subtab="polishing-mod-queue"]',     filter: "polishing-mod-filter-kp", box: "polishing-mod-queue-cards" },
+    "Final Inspection": { hash: "final-inspection", sub: null,                                                     filter: "final-filter-kp",     box: "final-inspection-queue-cards" },
+    "Dispatch":         { hash: "dispatch",         sub: '[data-dsp-sub="dispatch-sub-queue"]',                    filter: null,                  box: "dispatch-queue-cards" },
+    "Outsourcing":      { hash: "outsourcing",      sub: '[data-out-subtab="out-subtab-queue"]',                   filter: "out-filter-text",     box: "out-queue-cards" }
+  };
+
+  function injectFocusStyle() {
+    if ($("psp-focus-css")) return;
+    const st = document.createElement("style");
+    st.id = "psp-focus-css";
+    st.textContent = `@keyframes pspFocusGlow { 0%,100% { box-shadow:0 0 0 3px #f59e0b, 0 0 18px rgba(245,158,11,.65); } 50% { box-shadow:0 0 0 5px #f59e0b, 0 0 28px rgba(245,158,11,.9); } }
+      .psp-job-focus { animation: pspFocusGlow 1s ease-in-out 4; outline:3px solid #f59e0b; outline-offset:2px; border-radius:8px; }`;
+    document.head.appendChild(st);
+  }
+
+  function focusCard(el) {
+    document.querySelectorAll(".psp-job-focus").forEach(x => x.classList.remove("psp-job-focus"));
+    el.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+    el.classList.add("psp-job-focus");
+    setTimeout(() => el.classList.remove("psp-job-focus"), 6000);
+  }
+
+  function openJobInStage(kp) {
+    const job = allJobs().find(j => j.kpNumber === kp);
+    if (!job) return;
+    injectFocusStyle();
+    const stage = job.currentDepartment;
+    if (stage === "Inspection") {             // already on this page: just highlight it on the board
+      const el = document.querySelector(`.inspection-kanban-board [data-board-kp="${CSS.escape(kp)}"]`);
+      if (el) focusCard(el);
+      return;
+    }
+    const view = STAGE_VIEWS[stage];
+    if (!view) return;
+    const label = kpLabel(job).toUpperCase();
+    const cleanKp = String((typeof getCleanKpNumber === "function") ? getCleanKpNumber(job.kpNumber) : job.kpNumber).toUpperCase();
+    window.location.hash = "#/" + view.hash;
+
+    let tries = 0, filtered = false;
+    const attempt = () => {
+      tries++;
+      if (view.sub) { const b = document.querySelector(view.sub); if (b && !b.classList.contains("active")) b.click(); }
+      const box = $(view.box);
+      const cards = box ? [...box.querySelectorAll(".stage-kanban-card")] : [];
+      const head = c => { const h = c.querySelector(".job-card-header .font-mono, .job-card-header span"); return (h ? h.textContent : c.textContent).replace(/\s+/g, " ").trim().toUpperCase(); };
+      const match = cards.find(c => head(c) === label) || cards.find(c => head(c).startsWith(cleanKp));
+      if (match) { focusCard(match); return; }
+      // not visible (a filter may hide it): search that stage for this KP, then look again
+      if (!filtered && tries >= 3 && view.filter && $(view.filter)) {
+        filtered = true;
+        const f = $(view.filter);
+        f.value = cleanKp;
+        f.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      if (tries < 15) setTimeout(attempt, 200);
+    };
+    setTimeout(attempt, 150);
+  }
+  window.PSPOpenJob = openJobInStage;
 
   function pushFromInspection(job, targetStage) {
     if (typeof applyStageTransitionWithUndo !== "function") {
@@ -273,7 +344,7 @@
           ? (ro ? "" : `<button class="btn btn-secondary btn-xs" style="width:100%; height:28px; font-size:10px;" data-board-push="${esc(job.kpNumber)}">→ Move to Next Stage</button>`)
           : `<button class="btn btn-secondary btn-xs" style="width:100%; height:28px; font-size:10px;" data-board-open="${c.tab}">→ Open ${esc(c.stage)} Stage</button>`;
         const draggable = !ro;
-        return `<div class="kanban-card" ${draggable ? `draggable="true" data-board-kp="${esc(job.kpNumber)}" style="cursor:grab;"` : ""}>
+        return `<div class="kanban-card" data-board-kp="${esc(job.kpNumber)}" ${draggable ? `draggable="true" style="cursor:pointer;"` : `style="cursor:pointer;"`} title="Click to open in ${esc(c.stage)}">
             <div class="kanban-card-header">
               <span class="kanban-card-kp">${esc(kpLabel(job))}</span>
               <span class="kanban-card-priority ${esc(String(job.priority || "Normal").toLowerCase())}" title="Priority: ${esc(job.priority || "Normal")}"></span>
