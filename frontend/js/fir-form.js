@@ -15,7 +15,7 @@
 (function () {
   if (!window.PSP) { console.error("[PSP] fir-form: psp-common.js must load first."); return; }
   const { $, esc, opts, allJobs, user } = window.PSP;
-  const MODULE_VERSION = 5;
+  const MODULE_VERSION = 6;
 
   // ===================== CONFIG =====================
   const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzMXoqOSbxHnedhNpf_8XFAJ1UCLHHnwtDPqx_05gjU3rcb9U1mmlRfd0ma5ulwO3DV/exec";
@@ -191,7 +191,7 @@
       ? splitJobAndProgress(job, doneQty, ns, op, STAGE)
       : { type: "END_CYCLE", kpNo: job.kpNumber, stage: STAGE, operatorName: op, endTime: new Date().toISOString(), activeTimeMs: 0, nextStage: ns };
     const applyLocalMutation = ns => { if (!(doneQty < job.quantity)) transitionToStage(job, ns, op); };
-    window.pendingTransition = { job, stage: STAGE, payloadGenerator, applyLocalMutation };
+    window.pendingTransition = { job, stage: STAGE, payloadGenerator, applyLocalMutation, _fromFir: true };
     applyStageTransitionWithUndo(nextStage);
   }
 
@@ -316,7 +316,31 @@
   }
 
   // ===================== HOOKS =====================
+  let firBypass = false;
+  function installApplyHook() {
+    if (typeof window.applyStageTransitionWithUndo !== "function") return;
+    const origApply = window.applyStageTransitionWithUndo;
+    window.applyStageTransitionWithUndo = function (targetStage) {
+      const tr = window.pendingTransition;
+      if (!firBypass && tr && tr.stage === STAGE && tr.job && targetStage && targetStage !== STAGE && !tr._fromFir) {
+        window.pendingTransition = null;
+        openFIR(tr.job);
+        const next = $("fir-next");
+        if (next) {
+          if (![...next.options].some(o => o.value === targetStage)) {
+            const o = document.createElement("option"); o.value = targetStage; o.textContent = targetStage; next.appendChild(o);
+          }
+          next.value = targetStage;
+          updateLabels();
+        }
+        return;
+      }
+      return origApply.apply(this, arguments);
+    };
+  }
+
   function installHooks() {
+    installApplyHook();
     const finalBox = $("final-inspection-queue-cards");
     if (finalBox) {
       let queued = false;
