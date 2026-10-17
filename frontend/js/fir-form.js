@@ -15,7 +15,7 @@
 (function () {
   if (!window.PSP) { console.error("[PSP] fir-form: psp-common.js must load first."); return; }
   const { $, esc, opts, allJobs, user } = window.PSP;
-  const MODULE_VERSION = 6;
+  const MODULE_VERSION = 7;
 
   // ===================== CONFIG =====================
   const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzMXoqOSbxHnedhNpf_8XFAJ1UCLHHnwtDPqx_05gjU3rcb9U1mmlRfd0ma5ulwO3DV/exec";
@@ -49,6 +49,8 @@
         background:#ef4444; color:#fff; font-weight:800; cursor:pointer; line-height:22px; padding:0; }
       #psp-fir-modal .fir-foot { padding:10px 16px; border-top:1px solid var(--border-color,#cbd5e1); display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end; align-items:center; }
       #psp-fir-modal .fir-msg { flex:1; font-size:12px; font-weight:600; min-width:180px; }
+      @supports (height: 100dvh) { #psp-fir-modal .fir-box { max-height:calc(100dvh - 20px); } }
+      #psp-fir-modal .fir-foot { flex-shrink:0; padding-bottom:calc(10px + env(safe-area-inset-bottom, 0px)); }
       @media (max-width: 640px) { #psp-fir-modal .fir-grid { grid-template-columns:1fr; } #psp-fir-modal { padding:0; }
         #psp-fir-modal .fir-box { max-height:100dvh; height:100dvh; border-radius:0; } }`;
     document.head.appendChild(st);
