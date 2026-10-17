@@ -15,7 +15,7 @@
 (function () {
   if (!window.PSP) { console.error("[PSP] fir-form: psp-common.js must load first."); return; }
   const { $, esc, opts, allJobs, user } = window.PSP;
-  const MODULE_VERSION = 7;
+  const MODULE_VERSION = 8;
 
   // ===================== CONFIG =====================
   const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzMXoqOSbxHnedhNpf_8XFAJ1UCLHHnwtDPqx_05gjU3rcb9U1mmlRfd0ma5ulwO3DV/exec";
@@ -113,6 +113,21 @@
     const u = user(); return (u && (u.name || u.email)) || "Inspector";
   };
 
+  // FIR questions are needed only for Dispatch. For rework (earlier stage) or Outsourcing only Qty + "Send job to" stay.
+  const FIR_ONLY = ["fir-no", "fir-jc", "fir-clen", "fir-dia", "fir-inspector", "fir-report", "fir-outsourcing", "fir-photos"];
+  const FIR_REQUIRED = ["fir-no", "fir-inspector", "fir-report"];
+  const isFirNeeded = () => ($("fir-next").value || "Dispatch") === "Dispatch";
+  function applyMode() {
+    const need = isFirNeeded();
+    FIR_ONLY.forEach(id => {
+      const el = $(id); if (!el) return;
+      const wrap = el.closest(".fir-field"); if (wrap) wrap.style.display = need ? "" : "none";
+      if (FIR_REQUIRED.includes(id)) { if (need) el.setAttribute("required", ""); else el.removeAttribute("required"); }
+    });
+    $("psp-fir-title").textContent = need ? "✅ FIR – Final Inspection Report" : "↩️ Send job from Final Inspection";
+    $("psp-fir-skip").style.visibility = need ? "" : "hidden";
+  }
+
   function updateLabels() {
     const job = active && active.job;
     const q = parseInt($("fir-qty").value, 10);
@@ -121,7 +136,9 @@
       ? `${q} of ${job.quantity} pcs move on; ${job.quantity - q} stay in Final Inspection.`
       : `Job quantity: ${job.quantity} pcs.`;
     const next = $("fir-next").value || "Dispatch";
-    $("psp-fir-submit").textContent = `Submit FIR & Send to ${next}`;
+    applyMode();
+    $("psp-fir-submit").textContent = next === "Dispatch" ? "Submit FIR & Send to Dispatch"
+      : next === "Outsourcing" ? "Send to Outsourcing" : `Send back to ${next} (rework)`;
   }
 
   function openFIR(job) {
@@ -246,6 +263,12 @@
     if (isNaN(doneQty) || doneQty <= 0 || doneQty > job.quantity) {
       msg(`Qty must be between 1 and ${job.quantity}.`, "#ef4444"); $("fir-qty").focus(); return;
     }
+    if (!isFirNeeded()) {
+      // Rework or Outsourcing: no FIR. A move to an earlier stage asks for the rework reason (app pop-up); Outsourcing moves directly.
+      closeFIR();
+      moveJob(job, doneQty, data.sendTo);
+      return;
+    }
     const u = user() || {};
     const report = Object.assign({}, data, {
       partName: job.partName || "", customer: job.customer || "", jobQty: job.quantity,
@@ -324,7 +347,7 @@
     const origApply = window.applyStageTransitionWithUndo;
     window.applyStageTransitionWithUndo = function (targetStage) {
       const tr = window.pendingTransition;
-      if (!firBypass && tr && tr.stage === STAGE && tr.job && targetStage && targetStage !== STAGE && !tr._fromFir) {
+      if (!firBypass && tr && tr.stage === STAGE && tr.job && targetStage === "Dispatch" && !tr._fromFir) {
         window.pendingTransition = null;
         openFIR(tr.job);
         const next = $("fir-next");
