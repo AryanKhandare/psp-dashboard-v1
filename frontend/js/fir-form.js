@@ -15,14 +15,15 @@
 (function () {
   if (!window.PSP) { console.error("[PSP] fir-form: psp-common.js must load first."); return; }
   const { $, esc, opts, allJobs, user } = window.PSP;
-  const MODULE_VERSION = 8;
+  const MODULE_VERSION = 9;
 
   // ===================== CONFIG =====================
   const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzMXoqOSbxHnedhNpf_8XFAJ1UCLHHnwtDPqx_05gjU3rcb9U1mmlRfd0ma5ulwO3DV/exec";
   const TOKEN = "psp-mes-54f01c5b50486721db971093";
   const STAGE = "Final Inspection";
   const INSPECTORS = ["MF", "VG", "JN", "SJ", "Laxmi"];
-  const SEND_TO = ["Dispatch", "Outsourcing", "Polishing", "Grinding", "Sealing", "Spraying", "Masking", "Machining"];
+  const HOLD = "Hold for Customer Clearance";
+  const SEND_TO = ["Dispatch", HOLD, "Outsourcing", "Polishing", "Grinding", "Sealing", "Spraying", "Masking", "Machining"];
   const MAX_PHOTOS = 10;
 
   // ===================== UI =====================
@@ -116,7 +117,7 @@
   // FIR questions are needed only for Dispatch. For rework (earlier stage) or Outsourcing only Qty + "Send job to" stay.
   const FIR_ONLY = ["fir-no", "fir-jc", "fir-clen", "fir-dia", "fir-inspector", "fir-report", "fir-outsourcing", "fir-photos"];
   const FIR_REQUIRED = ["fir-no", "fir-inspector", "fir-report"];
-  const isFirNeeded = () => ($("fir-next").value || "Dispatch") === "Dispatch";
+  const isFirNeeded = () => ["Dispatch", HOLD].includes($("fir-next").value || "Dispatch");
   function applyMode() {
     const need = isFirNeeded();
     FIR_ONLY.forEach(id => {
@@ -137,7 +138,8 @@
       : `Job quantity: ${job.quantity} pcs.`;
     const next = $("fir-next").value || "Dispatch";
     applyMode();
-    $("psp-fir-submit").textContent = next === "Dispatch" ? "Submit FIR & Send to Dispatch"
+    $("psp-fir-submit").textContent = next === HOLD ? "Submit FIR & Send to Dispatch (Hold for Clearance)"
+      : next === "Dispatch" ? "Submit FIR & Send to Dispatch"
       : next === "Outsourcing" ? "Send to Outsourcing" : `Send back to ${next} (rework)`;
   }
 
@@ -206,12 +208,44 @@
   // ---------- the move (same as the app's original Final Inspection logic, with the FIR's qty) ----------
   function moveJob(job, doneQty, nextStage) {
     const op = operatorName();
-    const payloadGenerator = ns => (doneQty < job.quantity)
-      ? splitJobAndProgress(job, doneQty, ns, op, STAGE)
-      : { type: "END_CYCLE", kpNo: job.kpNumber, stage: STAGE, operatorName: op, endTime: new Date().toISOString(), activeTimeMs: 0, nextStage: ns };
+    let movedKp = job.kpNumber;
+    const payloadGenerator = ns => {
+      if (doneQty < job.quantity) {
+        const p = splitJobAndProgress(job, doneQty, ns, op, STAGE);
+        if (p && p.splitKp) movedKp = p.splitKp;
+        return p;
+      }
+      return { type: "END_CYCLE", kpNo: job.kpNumber, stage: STAGE, operatorName: op, endTime: new Date().toISOString(), activeTimeMs: 0, nextStage: ns };
+    };
     const applyLocalMutation = ns => { if (!(doneQty < job.quantity)) transitionToStage(job, ns, op); };
     window.pendingTransition = { job, stage: STAGE, payloadGenerator, applyLocalMutation, _fromFir: true };
     applyStageTransitionWithUndo(nextStage);
+    return () => movedKp;
+  }
+
+  // Hold for Customer Clearance: once the job is in Dispatch, flag it (dispatch.clearanceHold) so Dispatch highlights it
+  function markClearanceHold(getKp, by) {
+    const since = new Date().toISOString();
+    let tries = 0;
+    const attempt = async () => {
+      tries++;
+      const kp = getKp();
+      const local = allJobs().find(j => j.kpNumber === kp);
+      if (local) local.dispatch = Object.assign({}, local.dispatch || {}, { clearanceHold: { active: true, since, by } });
+      if (typeof isMockMode === "function" && isMockMode()) return;
+      try {
+        const snap = await firebase.firestore().collection("jobs").where("kpNumber", "==", kp).get();
+        const doc = snap.docs.find(d => d.data().isDeleted !== true);
+        if (doc && doc.data().currentStage === "Dispatch") {
+          await doc.ref.update({ "dispatch.clearanceHold": { active: true, since, by }, lastUpdated: firebase.firestore.FieldValue.serverTimestamp() });
+          try { if (typeof createAuditLog === "function") createAuditLog((user() || {}).email || by, kp, "Put on HOLD for customer clearance in Dispatch"); } catch (e) {}
+          if (typeof renderAll === "function") renderAll();
+          return;
+        }
+      } catch (e) { console.warn("[FIR] clearance hold:", e && e.message ? e.message : e); }
+      if (tries < 30) setTimeout(attempt, 2000);   // the move (and its UNDO window) may still be in progress
+    };
+    setTimeout(attempt, 1500);
   }
 
   // ---------- submit ----------
@@ -296,7 +330,11 @@
       job.firReport = report;
       busy = false; btn.disabled = false;
       closeFIR();
-      moveJob(job, doneQty, data.sendTo);
+      if (data.sendTo === HOLD) {
+        markClearanceHold(moveJob(job, doneQty, "Dispatch"), u.name || u.email || "Unknown");
+      } else {
+        moveJob(job, doneQty, data.sendTo);
+      }
     } catch (err) {
       busy = false; btn.disabled = false;
       msg("Could not save the FIR: " + (err && err.message ? err.message : err), "#ef4444");
@@ -401,7 +439,8 @@
       if (!confirm(`Skip the FIR and send ${job.kpNumber} (${doneQty} pcs) to ${next}? This is recorded in the audit log.`)) return;
       try { if (typeof createAuditLog === "function") createAuditLog((user() || {}).email || "Super Admin", job.kpNumber, `FIR SKIPPED by Super Admin → ${next}`); } catch (e) {}
       closeFIR();
-      moveJob(job, doneQty, next);
+      if (next === HOLD) markClearanceHold(moveJob(job, doneQty, "Dispatch"), (user() || {}).name || "Super Admin");
+      else moveJob(job, doneQty, next);
     });
     document.addEventListener("keydown", e => {
       if (e.key === "Escape" && $("psp-fir-modal").style.display === "flex") cancelFIR();
