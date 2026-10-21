@@ -8,12 +8,16 @@
  * Filters: search + date range (default last 30 days). Export to Excel (CSV).
  *
  * FIR details are not part of the app's job list, so they are fetched once when History is opened.
+ *
+ * Hold for Customer Clearance (set from the FIR form, stored as dispatch.clearanceHold):
+ * the Dispatch card and its main-board card are highlighted amber, "✔ Clearance Received" releases it,
+ * and "Dispatch & Close" on a held job asks for confirmation first.
  * Load after psp-common.js and the other add-ons, before app.js.
  */
 (function () {
   if (!window.PSP) { console.error("[PSP] dispatch-history: psp-common.js must load first."); return; }
   const { $, esc, allJobs, kpLabel } = window.PSP;
-  const MODULE_VERSION = 1;
+  const MODULE_VERSION = 2;
   let sub = "dispatch-sub-queue";
   const firCache = new Map();   // KP -> firReport
   let firLoaded = false, firLoading = false;
@@ -55,9 +59,10 @@
 
     const kpis = document.createElement("div");
     kpis.className = "grinding-kpis-grid";
-    kpis.style.cssText = "grid-template-columns:repeat(4,1fr); margin-bottom:20px;";
+    kpis.style.cssText = "grid-template-columns:repeat(5,1fr); margin-bottom:20px;";
     kpis.innerHTML = `
       <div class="metric-card"><span class="metric-val text-orange" id="dsp-kpi-ready">0</span><span class="metric-lbl">Ready to Dispatch</span></div>
+      <div class="metric-card" style="border:2px solid #f59e0b;"><span class="metric-val" id="dsp-kpi-hold" style="color:#d97706;">0</span><span class="metric-lbl">On Hold (Customer Clearance)</span></div>
       <div class="metric-card"><span class="metric-val text-green" id="dsp-kpi-today">0</span><span class="metric-lbl">Dispatched Today</span></div>
       <div class="metric-card"><span class="metric-val text-blue" id="dsp-kpi-week">0</span><span class="metric-lbl">Last 7 Days</span></div>
       <div class="metric-card"><span class="metric-val text-cyan" id="dsp-kpi-month">0</span><span class="metric-lbl">This Month</span></div>`;
@@ -134,7 +139,9 @@
     const week = new Date(startToday); week.setDate(week.getDate() - 6);
     const month = new Date(now.getFullYear(), now.getMonth(), 1);
     const set = (id, v) => { const el = $(id); if (el) el.textContent = v; };
-    set("dsp-kpi-ready", allJobs().filter(j => j.currentDepartment === "Dispatch").length);
+    const inDispatch = allJobs().filter(j => j.currentDepartment === "Dispatch");
+    set("dsp-kpi-hold", inDispatch.filter(onHold).length);
+    set("dsp-kpi-ready", inDispatch.filter(j => !onHold(j)).length);
     set("dsp-kpi-today", all.filter(r => r.at && r.at >= startToday).length);
     set("dsp-kpi-week", all.filter(r => r.at && r.at >= week).length);
     set("dsp-kpi-month", all.filter(r => r.at && r.at >= month).length);
@@ -197,7 +204,103 @@
     document.body.appendChild(a); a.click(); a.remove();
   }
 
+  // ===================== HOLD FOR CUSTOMER CLEARANCE =====================
+  const onHold = j => !!(j && j.dispatch && j.dispatch.clearanceHold && j.dispatch.clearanceHold.active);
+  const AMBER = "#f59e0b";
+  function holdSince(j) {
+    const h = (j.dispatch || {}).clearanceHold || {};
+    const d = toDate(h.since);
+    return `${d ? fmtDT(d) : ""}${h.by ? " · by " + shortName(h.by) : ""}`;
+  }
+  function injectHoldStyle() {
+    if ($("dsp-hold-css")) return;
+    const st = document.createElement("style");
+    st.id = "dsp-hold-css";
+    st.textContent = `.dsp-on-hold { border:2px solid ${AMBER} !important; background:rgba(245,158,11,0.12) !important; box-shadow:0 0 0 2px rgba(245,158,11,.25); }
+      .dsp-hold-banner { background:${AMBER}; color:#1f1300; font-weight:800; font-size:11px; letter-spacing:.3px; padding:5px 8px; border-radius:5px; margin-bottom:8px; }
+      .dsp-hold-banner small { display:block; font-weight:600; font-size:10px; opacity:.85; letter-spacing:0; }`;
+    document.head.appendChild(st);
+  }
+  // Match a rendered card to its job by the "KP (JC)" label in its header
+  function jobForCard(card, pool, used) {
+    const head = card.querySelector(".job-card-header .font-mono, .kanban-card-kp");
+    if (!head) return null;
+    const text = head.textContent.replace(/\s+/g, " ").trim();
+    const job = pool.find(j => !used.has(j) && kpLabel(j) === text);
+    if (job) used.add(job);
+    return job;
+  }
+  function decorateDispatchCards() {
+    injectHoldStyle();
+    const pool = allJobs().filter(j => j.currentDepartment === "Dispatch");
+    const ro = window.PSP.isReadOnly ? window.PSP.isReadOnly() : false;
+    // Dispatch tab queue
+    const box = $("dispatch-queue-cards");
+    if (box) {
+      const used = new Set();
+      box.querySelectorAll(":scope > .stage-kanban-card").forEach(card => {
+        card.querySelectorAll(".dsp-hold-banner, [data-dsp-release]").forEach(x => x.remove());
+        card.classList.remove("dsp-on-hold");
+        const job = jobForCard(card, pool, used);
+        if (!job || !onHold(job)) return;
+        card.classList.add("dsp-on-hold");
+        const banner = document.createElement("div");
+        banner.className = "dsp-hold-banner";
+        banner.innerHTML = `⏸ HOLD – CUSTOMER CLEARANCE<small>${esc(holdSince(job))}</small>`;
+        const body = card.querySelector(".job-card-body");
+        if (body) body.parentNode.insertBefore(banner, body);
+        const badge = card.querySelector(".badge-completed");
+        if (badge && /ready/i.test(badge.textContent)) { badge.textContent = "Awaiting Customer Clearance"; badge.style.background = AMBER; badge.style.color = "#1f1300"; }
+        const actions = card.querySelector(".stage-card-actions");
+        if (actions && !ro) {
+          const b = document.createElement("button");
+          b.className = "btn btn-xs";
+          b.setAttribute("data-dsp-release", job.kpNumber);
+          b.style.cssText = `width:100%; height:32px; background:${AMBER}; color:#1f1300; font-weight:800; border:0;`;
+          b.textContent = "✔ Clearance Received";
+          actions.insertBefore(b, actions.firstChild);
+        }
+      });
+    }
+    // Main board DISPATCH column
+    const col = $("cards-dispatch-stage");
+    if (col) {
+      col.querySelectorAll("[data-board-kp]").forEach(card => {
+        const job = pool.find(j => j.kpNumber === card.getAttribute("data-board-kp"));
+        const old = card.querySelector(".dsp-hold-banner");
+        if (old) old.remove();
+        card.classList.toggle("dsp-on-hold", !!(job && onHold(job)));
+        if (job && onHold(job)) {
+          const tag = document.createElement("div");
+          tag.className = "dsp-hold-banner";
+          tag.style.marginBottom = "6px";
+          tag.textContent = "⏸ HOLD – CUSTOMER CLEARANCE";
+          card.insertBefore(tag, card.firstChild);
+        }
+      });
+    }
+  }
+
+  async function releaseHold(kp) {
+    const job = allJobs().find(j => j.kpNumber === kp);
+    if (!job || !onHold(job)) return;
+    if (!confirm(`Customer clearance received for ${kpLabel(job)}?\n\nThe job becomes ready to dispatch.`)) return;
+    const u = window.PSP.user() || {};
+    const released = Object.assign({}, job.dispatch.clearanceHold, { active: false, releasedAt: new Date().toISOString(), releasedBy: u.name || u.email || "User" });
+    job.dispatch.clearanceHold = released;
+    decorateDispatchCards(); renderKpis();
+    try {
+      if (!(typeof isMockMode === "function" && isMockMode())) {
+        const db = firebase.firestore();
+        const ref = job.id ? db.collection("jobs").doc(job.id) : db.collection("jobs").doc("job_" + job.kpNumber);
+        await ref.update({ "dispatch.clearanceHold": released, lastUpdated: firebase.firestore.FieldValue.serverTimestamp() });
+      }
+      if (typeof createAuditLog === "function") createAuditLog(u.email || released.releasedBy, kp, "Customer clearance received – released from HOLD in Dispatch");
+    } catch (e) { alert("Could not save: " + (e && e.message ? e.message : e)); }
+  }
+
   function render() {
+    try { decorateDispatchCards(); } catch (e) { console.warn("[Dispatch] hold display:", e); }
     const pane = $("tab-dispatch");
     if (!pane || !pane.classList.contains("active")) return;
     renderKpis();
@@ -205,6 +308,25 @@
   }
 
   function installHooks() {
+    ["dispatch-queue-cards", "cards-dispatch-stage"].forEach(id => {
+      const el = $(id);
+      if (!el) return;
+      let queued = false;
+      new MutationObserver(() => { if (queued) return; queued = true; setTimeout(() => { queued = false; try { decorateDispatchCards(); } catch (e) {} }, 0); })
+        .observe(el, { childList: true });
+    });
+    document.addEventListener("click", e => {
+      const b = e.target.closest("[data-dsp-release]");
+      if (b) { e.stopPropagation(); releaseHold(b.getAttribute("data-dsp-release")); }
+    }, true);
+    if (typeof window.triggerDispatchFloatingTransition === "function") {
+      const origDispatch = window.triggerDispatchFloatingTransition;
+      window.triggerDispatchFloatingTransition = function (kpNumber) {
+        const job = allJobs().find(j => j.kpNumber === kpNumber);
+        if (job && onHold(job) && !confirm(`${kpLabel(job)} is on HOLD for customer clearance (${holdSince(job)}).\n\nCustomer clearance not received yet. Dispatch anyway?`)) return;
+        return origDispatch.apply(this, arguments);
+      };
+    }
     if (typeof window.executeRenderAll === "function") {
       const orig = window.executeRenderAll;
       window.executeRenderAll = function () {
