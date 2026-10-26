@@ -8,14 +8,14 @@
  * Saved to:
  *   - Firebase: job.pirReport (latest) + job.pirReports (all), job.processType = chosen process
  *   - Google Sheet "PIR_Reports" tab + photos in Google Drive, through the PIR Apps Script (PIR_SCRIPT_URL)
- * "Blank PIR/Quarantine" saves the PIR and keeps the job in Inspection, marked QUARANTINE.
+ * "Blank PIR/Quarantine" saves the PIR and moves the job to the Quarantine stage (reason: Blank PIR).
  *
  * Load after the other add-ons, before app.js. Replaces inspection-form.js (remove that script line).
  */
 (function () {
   if (!window.PSP) { console.error("[PSP] pir-form: psp-common.js must load first."); return; }
   const { $, esc, opts, allJobs, user } = window.PSP;
-  const MODULE_VERSION = 6;
+  const MODULE_VERSION = 7;
 
   // ===================== CONFIG =====================
   // The MES Stage Sync Apps Script (it also handles PIRs: PIR_Reports tab + photos in Drive).
@@ -125,7 +125,7 @@
 
   function updateSubmitLabel() {
     const next = $("pir-next").value;
-    $("psp-pir-submit").textContent = next === QUARANTINE ? "Submit PIR (Quarantine – stays in Inspection)"
+    $("psp-pir-submit").textContent = (next === QUARANTINE || next === "Quarantine") ? "Submit PIR & Move to Quarantine"
       : next ? `Submit PIR & Move to ${next}` : "Submit PIR & Move";
   }
 
@@ -293,8 +293,8 @@
         msg("Could not reach the PIR sheet: " + (err && err.message ? err.message : err) + ". Check the internet and press Submit again.", "#ef4444");
         return;
       }
-      const quarantine = data.nextStage === QUARANTINE;
-      await saveToFirebase(job, report, quarantine ? { quarantine: true, quarantineReason: "Blank PIR/Quarantine", quarantineAt: report.submittedAt } : { quarantine: false });
+      const quarantine = data.nextStage === QUARANTINE || data.nextStage === "Quarantine";
+      await saveToFirebase(job, report, {});
       try {
         if (typeof createAuditLog === "function") createAuditLog(u.email || report.submittedBy, job.kpNumber,
           `PIR ${data.pirNo} submitted (${data.status}, ${data.processes}) → ${data.nextStage}${report.photoUrls.length ? `, ${report.photoUrls.length} photo(s)` : ""}`);
@@ -306,11 +306,19 @@
       busy = false; btn.disabled = false;
       closePIR();
       if (quarantine) {
-        job.quarantine = true;
+        // Move into the Quarantine stage with the reason already known (no second pop-up)
+        if (window.PSPQuarantine && typeof window.PSPQuarantine.setNextReason === "function") {
+          window.PSPQuarantine.setNextReason(data.nextStage === QUARANTINE ? "Blank PIR" : "Quality issue / NCR",
+            `PIR ${data.pirNo} – status ${data.status}`);
+          window.pendingTransition = transition;
+          bypass = true;
+          try { window.applyStageTransitionWithUndo("Quarantine"); } finally { bypass = false; }
+          return;
+        }
         const overlay = $("transition-drag-overlay"); if (overlay) overlay.style.display = "none";
         window.pendingTransition = null;
         try { if (typeof renderAll === "function") renderAll(); } catch (err3) {}
-        alert(`PIR saved${sheetNote}.\n\n${job.kpNumber} stays in Inspection, marked QUARANTINE.`);
+        alert(`PIR saved${sheetNote}.\n\n${job.kpNumber} stays in Inspection (the Quarantine tab is not loaded).`);
         return;
       }
       window.pendingTransition = transition;
