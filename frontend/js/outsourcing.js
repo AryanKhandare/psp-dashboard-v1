@@ -14,7 +14,7 @@
 (function () {
   if (!window.PSP) { console.error("[PSP] outsourcing: psp-common.js must load first."); return; }
   const { $, esc, opts, allJobs, user, isReadOnly, kpLabel, qtyLabel } = window.PSP;
-  const MODULE_VERSION = 4;
+  const MODULE_VERSION = 5;
 
   const STAGE = "Outsourcing";
   // Inspectors (Inspection-department operators) who may also use the Outsourcing tab, by login name
@@ -270,7 +270,7 @@
             <div class="job-card-row"><span class="job-card-label">Quantity:</span><span class="job-card-value font-mono">${qtyLabel(job)}</span></div>
             ${rows.map(r => `<div class="job-card-row"><span class="job-card-label">${r[0]}:</span><span class="job-card-value">${r[1]}</span></div>`).join("")}
           </div>
-          <div class="stage-card-actions" style="border-top:1px solid rgba(255,255,255,0.05); padding-top:10px; display:flex; flex-direction:column; gap:8px;">${action}</div>
+          <div class="stage-card-actions" style="border-top:1px solid rgba(255,255,255,0.05); padding-top:10px; display:flex; flex-direction:column; gap:8px;">${action}${typeof buildDeleteJobButtonHTML === "function" ? buildDeleteJobButtonHTML(job.kpNumber) : ""}</div>
         </div>`;
     }).join("");
   }
