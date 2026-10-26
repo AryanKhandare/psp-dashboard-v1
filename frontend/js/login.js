@@ -1052,7 +1052,8 @@ document.addEventListener("DOMContentLoaded", () => {
     // and the email prefix must match column V in the sheet (mf@ -> MF, laxmi@ -> Laxmi)
     "Inspection": ["MF", "SJ", "VG", "GT", "JN", "Laxmi"],
     "Machining": ["Viraj", "Bhim", "Sandesh", "Manoj"],
-    "Sealing": ["Rajkaran", "Suraj", "Prisam"]
+    "Sealing": ["Rajkaran", "Suraj", "Prisam"],
+    "Blasting": ["Rupesh", "Devnath", "Sunil", "Suraj", "Prizam", "Damru", "Jayanta"]
   };
 
   const populateOperatorNames = () => {
