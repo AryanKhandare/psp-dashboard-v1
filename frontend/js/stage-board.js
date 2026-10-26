@@ -9,7 +9,7 @@
 (function () {
   if (!window.PSP) { console.error("[PSP] stage-board: psp-common.js must load first."); return; }
   const { $, esc, opts, allJobs, user, isReadOnly, fmt, kpLabel, qtyLabel, stageKeyOf } = window.PSP;
-  const MODULE_VERSION = 7;
+  const MODULE_VERSION = 8;
 
   let boardDragging = false; // pause board redraws while a card is being dragged
 
@@ -20,6 +20,7 @@
     { stage: "Inspection", tab: "inspection", cards: "cards-intake",           count: "count-intake" },
     { stage: "Machining",  tab: "machining",  cards: "cards-machining-stage",  count: "count-machining-stage" },
     { stage: "Masking",    tab: "masking",    cards: "cards-visual",           count: "count-visual" },
+    { stage: "Blasting",   tab: "blasting",   cards: "cards-blasting-stage",   count: "count-blasting-stage", extra: { after: "cards-visual", color: "#64748b" } },
     { stage: "Spraying",   tab: "spraying",   cards: "cards-dimensional",      count: "count-dimensional" },
     { stage: "Sealing",    tab: "sealing",    cards: "cards-sealing-stage",    count: "count-sealing-stage",  extra: { after: "cards-dimensional", color: "#0d9488" } },
     { stage: "Grinding",   tab: "grinding",   cards: "cards-review",           count: "count-review" },
@@ -141,6 +142,7 @@
     "Machining":        { hash: "machining",        sub: '#tab-machining [data-subtab="machining-subtab-queue"]', filter: "machining-filter-kp", box: "machining-queue-cards" },
     "Masking":          { hash: "masking",          sub: '[data-subtab="masking-subtab-queue"]',                   filter: "filter-kp",           box: "masking-queue-cards" },
     "Spraying":         { hash: "spraying",         sub: '[data-subtab="spraying-subtab-queue"]',                  filter: "spraying-filter-kp",  box: "spraying-queue-cards" },
+    "Blasting":         { hash: "blasting",         sub: '#tab-blasting [data-subtab="blasting-subtab-queue"]',    filter: "blasting-filter-kp",  box: "blasting-queue-cards" },
     "Sealing":          { hash: "sealing",          sub: '#tab-sealing [data-subtab="sealing-subtab-queue"]',      filter: "sealing-filter-kp",   box: "sealing-queue-cards" },
     "Grinding":         { hash: "grinding",         sub: '[data-subtab="grinding-subtab-queue"]',                  filter: "grinding-filter-kp",  box: "grinding-queue-cards" },
     "Polishing":        { hash: "polishing",        sub: '#tab-polishing [data-subtab="polishing-mod-queue"]',     filter: "polishing-mod-filter-kp", box: "polishing-mod-queue-cards" },
