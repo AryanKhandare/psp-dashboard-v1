@@ -15,7 +15,7 @@
 (function () {
   if (!window.PSP) { console.error("[PSP] fir-form: psp-common.js must load first."); return; }
   const { $, esc, opts, allJobs, user } = window.PSP;
-  const MODULE_VERSION = 10;
+  const MODULE_VERSION = 11;
 
   // ===================== CONFIG =====================
   const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzMXoqOSbxHnedhNpf_8XFAJ1UCLHHnwtDPqx_05gjU3rcb9U1mmlRfd0ma5ulwO3DV/exec";
@@ -23,7 +23,7 @@
   const STAGE = "Final Inspection";
   const INSPECTORS = ["MF", "VG", "JN", "SJ", "Laxmi"];
   const HOLD = "Hold for Customer Clearance";
-  const SEND_TO = ["Dispatch", HOLD, "Outsourcing", "Polishing", "Grinding", "Sealing", "Spraying", "Blasting", "Masking", "Machining"];
+  const SEND_TO = ["Dispatch", HOLD, "Outsourcing", "Polishing", "Grinding", "Sealing", "Spraying", "Blasting", "Masking", "Machining", "Quarantine"];
   const MAX_PHOTOS = 10;
 
   // ===================== UI =====================
@@ -140,7 +140,7 @@
     applyMode();
     $("psp-fir-submit").textContent = next === HOLD ? "Submit FIR & Send to Dispatch (Hold for Clearance)"
       : next === "Dispatch" ? "Submit FIR & Send to Dispatch"
-      : next === "Outsourcing" ? "Send to Outsourcing" : `Send back to ${next} (rework)`;
+      : next === "Outsourcing" ? "Send to Outsourcing" : next === "Quarantine" ? "⛔ Send to Quarantine" : `Send back to ${next} (rework)`;
   }
 
   function openFIR(job) {
