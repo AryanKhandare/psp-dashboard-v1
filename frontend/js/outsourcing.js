@@ -14,7 +14,7 @@
 (function () {
   if (!window.PSP) { console.error("[PSP] outsourcing: psp-common.js must load first."); return; }
   const { $, esc, opts, allJobs, user, isReadOnly, kpLabel, qtyLabel } = window.PSP;
-  const MODULE_VERSION = 6;
+  const MODULE_VERSION = 7;
 
   const STAGE = "Outsourcing";
   // Inspectors (Inspection-department operators) who may also use the Outsourcing tab, by login name
@@ -129,6 +129,7 @@
       </div>
       <div class="grinding-tabs-nav">
         <button type="button" class="machining-tab-btn active" data-out-subtab="out-subtab-queue"><span class="subtab-icon">📋</span><span class="subtab-label">Queue</span></button>
+        <button type="button" class="machining-tab-btn" data-out-subtab="out-subtab-vendor"><span class="subtab-icon">🏭</span><span class="subtab-label">By Vendor</span></button>
         <button type="button" class="machining-tab-btn" data-out-subtab="out-subtab-history"><span class="subtab-icon">📜</span><span class="subtab-label">History</span></button>
       </div>
       <div id="out-subtab-queue" class="machining-subtab-panel active">
@@ -137,6 +138,7 @@
           <div class="panel-body">
             <div class="filters-toolbar">
               <div class="filter-group"><label for="out-filter-text">Search:</label><input type="text" id="out-filter-text" class="form-input input-sm" placeholder="KP, JC, customer, vendor..."></div>
+              <div class="filter-group"><label for="out-filter-vendor">Vendor:</label><select id="out-filter-vendor" class="form-input select-sm"><option value="">All vendors</option></select></div>
               <div class="filter-group"><label for="out-filter-state">Status:</label>
                 <select id="out-filter-state" class="form-input select-sm"><option value="">All</option><option value="Pending">Waiting to send</option>
                   <option value="At Vendor">At vendor</option><option value="overdue">Overdue only</option><option value="Returned">Received back</option></select></div>
@@ -146,11 +148,18 @@
           </div>
         </div>
       </div>
+      <div id="out-subtab-vendor" class="machining-subtab-panel">
+        <div class="panel">
+          <div class="panel-header"><h3>JOBS BY VENDOR</h3><span class="panel-subtitle">What is at each vendor right now, overdue first.</span></div>
+          <div class="panel-body"><div id="out-vendor-blocks" style="display:flex; flex-direction:column; gap:14px;"></div></div>
+        </div>
+      </div>
       <div id="out-subtab-history" class="machining-subtab-panel">
         <div class="panel">
           <div class="panel-header"><h3>OUTSOURCING HISTORY (ALL TRIPS)</h3></div>
           <div class="panel-body">
             <div class="filters-toolbar">
+              <div class="filter-group"><label for="out-hist-vendor">Vendor:</label><select id="out-hist-vendor" class="form-input select-sm"><option value="">All vendors</option></select></div>
               <div class="filter-group"><label for="out-hist-text">Search:</label><input type="text" id="out-hist-text" class="form-input input-sm" placeholder="KP, customer, vendor, DC no..."></div>
             </div>
             <div style="overflow-x:auto;">
@@ -173,7 +182,7 @@
     const css = 'class="form-input" style="height:48px; font-size:16px; width:100%;"';
     wrap.innerHTML = `
       <div id="out-modal-send" class="modal-overlay"><div class="modal-content">
-        <div class="modal-header"><h3>Send to Vendor</h3><button type="button" class="modal-close" data-out-close="out-modal-send">&times;</button></div>
+        <div class="modal-header"><h3 id="out-send-title">Send to Vendor</h3><button type="button" class="modal-close" data-out-close="out-modal-send">&times;</button></div>
         <div class="modal-body">
           <p>Send <strong id="out-send-kp" class="text-cyan"></strong> <span id="out-send-from" class="text-muted text-xs"></span> to an outside vendor.</p>
           <form id="out-send-form" class="industrial-form mt-1">
@@ -185,11 +194,11 @@
             </div>
             <div class="form-grid">
               ${fld("out-sent", "Sent Date", true, `<input id="out-sent" type="date" ${css} required>`)}
-              ${fld("out-expected", "Expected Return Date", true, `<input id="out-expected" type="date" ${css} required>`)}
+              ${fld("out-expected", "Expected Return Date (optional – can be added later)", false, `<input id="out-expected" type="date" ${css}>`)}
             </div>
             ${fld("out-remarks", "Remarks", false, `<input id="out-remarks" ${css}>`)}
             <div class="form-actions mt-1" style="flex-direction:column; gap:12px;">
-              <button type="submit" class="btn btn-success btn-tablet-primary" style="height:56px; font-size:17px;">Send to Vendor</button>
+              <button type="submit" id="out-send-submit" class="btn btn-success btn-tablet-primary" style="height:56px; font-size:17px;">Send to Vendor</button>
               <button type="button" class="btn btn-secondary modal-cancel-btn" data-out-close="out-modal-send" style="height:52px; width:100%;">Cancel</button>
             </div>
           </form>
@@ -233,8 +242,10 @@
     if (!box) return;
     const q = ($("out-filter-text").value || "").toLowerCase();
     const st = $("out-filter-state").value;
+    const vf = $("out-filter-vendor").value;
     const list = outJobs().filter(j => {
       const o = outOf(j), s = stateOf(j);
+      if (vf && (s === "Pending" || (o.vendor || "") !== vf)) return false;
       if (st === "overdue" ? !isOverdue(j) : (st && s !== st)) return false;
       const jc = (typeof getJobJcNo === "function") ? getJobJcNo(j) : (j.jcNo || "");
       if (q && ![j.kpNumber, jc, j.customer, j.partName, o.vendor, o.dcNo].some(v => String(v || "").toLowerCase().includes(q))) return false;
@@ -252,13 +263,14 @@
       if (s !== "Pending") {
         rows.push(["Vendor", `<strong>${esc(o.vendor || "—")}</strong>`], ["Work", esc(o.work || "—")], ["DC No.", esc(o.dcNo || "—")],
                   ["Qty Sent", esc(o.qtySent || "—")], ["Sent On", fmtDay(o.sentAt)],
-                  ["Expected Back", `<span style="${late ? "color:#ef4444; font-weight:800;" : ""}">${fmtDay(o.expectedReturn)}</span>`]);
+                  ["Expected Back", o.expectedReturn ? `<span style="${late ? "color:#ef4444; font-weight:800;" : ""}">${fmtDay(o.expectedReturn)}</span>` : `<span class="text-muted">not set</span>`]);
         if (daysOut !== null) rows.push(["Days at Vendor", `<span class="font-mono">${daysOut} d</span>`]);
       }
       const action = ro ? "" : s === "Pending"
         ? `<button class="btn btn-success btn-xs" style="width:100%; height:34px;" data-out-send="${esc(job.kpNumber)}">SEND TO VENDOR</button>`
         : s === "At Vendor"
-          ? `<button class="btn btn-primary btn-xs" style="width:100%; height:34px;" data-out-receive="${esc(job.kpNumber)}">RECEIVE BACK</button>`
+          ? `<button class="btn btn-primary btn-xs" style="width:100%; height:34px;" data-out-receive="${esc(job.kpNumber)}">RECEIVE BACK</button>
+             <button class="btn btn-secondary btn-xs" style="width:100%; height:30px;" data-out-edit="${esc(job.kpNumber)}">✏️ EDIT DETAILS / EXPECTED DATE</button>`
           : `<button class="btn btn-primary btn-xs" style="width:100%; height:34px;" data-out-receive="${esc(job.kpNumber)}">MOVE TO STAGE</button>`;
       return `<div class="stage-kanban-card"${late ? ' style="border:2px solid #ef4444;"' : ""}>
           <div class="stage-card-priority-strip ${esc(String(job.priority || "Normal").toLowerCase())}"></div>
@@ -285,7 +297,8 @@
     const tbody = $("out-history-body");
     if (!tbody) return;
     const q = ($("out-hist-text").value || "").toLowerCase();
-    const list = allTrips().filter(t => !q || [t.job.kpNumber, t.job.customer, t.vendor, t.dcNo, t.work].some(v => String(v || "").toLowerCase().includes(q)));
+    const hv = $("out-hist-vendor").value;
+    const list = allTrips().filter(t => (!hv || (t.vendor || "") === hv) && (!q || [t.job.kpNumber, t.job.customer, t.vendor, t.dcNo, t.work].some(v => String(v || "").toLowerCase().includes(q))));
     if (!list.length) { tbody.innerHTML = `<tr><td colspan="13" class="text-center text-muted">No outsourcing trips recorded yet.</td></tr>`; return; }
     tbody.innerHTML = list.map(t => {
       const s = parseDay(t.sentAt), r = parseDay(t.receivedAt);
@@ -297,11 +310,77 @@
     }).join("");
   }
 
+  // Vendors known from current jobs and past trips (for the filters)
+  function allVendors() {
+    return [...new Set(outJobs().filter(j => stateOf(j) !== "Pending").map(j => outOf(j).vendor).concat(allTrips().map(t => t.vendor)).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b));
+  }
+  function fillVendorFilters() {
+    const vendors = allVendors();
+    [["out-filter-vendor", true], ["out-hist-vendor", false]].forEach(([id, withPending]) => {
+      const sel = $(id); if (!sel) return;
+      const cur = sel.value;
+      sel.innerHTML = `<option value="">All vendors</option>` + vendors.map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join("");
+      if ([...sel.options].some(o => o.value === cur)) sel.value = cur;
+    });
+  }
+
+  function renderVendors() {
+    const box = $("out-vendor-blocks");
+    if (!box) return;
+    const groups = new Map();
+    outJobs().forEach(j => {
+      const s = stateOf(j);
+      const key = s === "Pending" ? "__waiting__" : (outOf(j).vendor || "(vendor not recorded)");
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(j);
+    });
+    if (!groups.size) { box.innerHTML = `<div class="no-selection-message">No jobs in Outsourcing.</div>`; return; }
+    const trips = allTrips();
+    const blocks = [...groups.entries()].map(([vendor, jobs]) => {
+      const waiting = vendor === "__waiting__";
+      const overdue = jobs.filter(isOverdue).length;
+      const pcs = jobs.reduce((n, j) => n + (Number(outOf(j).qtySent || j.quantity) || 0), 0);
+      const sentDates = jobs.map(j => parseDay(outOf(j).sentAt)).filter(Boolean).sort((a, b) => a - b);
+      const done = waiting ? 0 : trips.filter(t => t.vendor === vendor).length;
+      jobs.sort((a, b) => (isOverdue(b) - isOverdue(a)) || String(outOf(a).sentAt || "").localeCompare(String(outOf(b).sentAt || "")));
+      return { vendor, waiting, overdue, jobs, html: `
+        <div style="border:1px solid var(--border-color,#cbd5e1); border-left:5px solid ${waiting ? "#f59e0b" : overdue ? "#ef4444" : "#a855f7"}; border-radius:8px; overflow:hidden;">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; padding:10px 14px; background:rgba(148,163,184,.10);">
+            <div style="font-size:15px; font-weight:800;">${waiting ? "⏳ Waiting to send (no vendor yet)" : "🏭 " + esc(vendor)}</div>
+            <div style="display:flex; gap:14px; flex-wrap:wrap; font-size:12px;">
+              <span><strong>${jobs.length}</strong> job(s)</span><span><strong>${pcs}</strong> pcs</span>
+              ${waiting ? "" : `<span style="${overdue ? "color:#ef4444; font-weight:800;" : ""}"><strong>${overdue}</strong> overdue</span>`}
+              ${!waiting && sentDates.length ? `<span>oldest sent <strong>${fmtDay(sentDates[0].toISOString())}</strong></span>` : ""}
+              ${done ? `<span class="text-muted">${done} trip(s) completed earlier</span>` : ""}
+            </div>
+          </div>
+          <div style="overflow-x:auto;"><table class="data-table" style="margin:0;">
+            <thead><tr><th>KP Number</th><th>Part Name</th><th>Customer</th><th>Qty</th><th>Work</th><th>DC No.</th><th>Sent On</th><th>Expected Back</th><th>Days Out</th><th>From Stage</th></tr></thead>
+            <tbody>${jobs.map(j => {
+              const o = outOf(j), late = isOverdue(j), so = parseDay(o.sentAt);
+              return `<tr${late ? ' style="background:rgba(239,68,68,.10);"' : ""}>
+                <td class="font-mono font-bold text-cyan">${esc(kpLabel(j))}</td><td>${esc(j.partName)}</td><td>${esc(j.customer)}</td>
+                <td class="font-mono">${esc(o.qtySent || j.quantity || "")}</td><td>${esc(o.work || "—")}</td><td>${esc(o.dcNo || "—")}</td>
+                <td style="white-space:nowrap;">${o.sentAt ? fmtDay(o.sentAt) : "—"}</td>
+                <td style="white-space:nowrap; ${late ? "color:#ef4444; font-weight:800;" : ""}">${o.expectedReturn ? fmtDay(o.expectedReturn) + (late ? " (late)" : "") : (waiting ? "—" : '<span class="text-muted">not set</span>')}</td>
+                <td class="font-mono">${so ? daysBetween(so, new Date()) + " d" : "—"}</td><td>${esc(o.fromStage || "—")}</td></tr>`;
+            }).join("")}</tbody></table></div>
+        </div>` };
+    });
+    // overdue vendors first, then by number of jobs, waiting group last
+    blocks.sort((a, b) => (a.waiting - b.waiting) || (b.overdue - a.overdue) || (b.jobs.length - a.jobs.length) || a.vendor.localeCompare(b.vendor));
+    box.innerHTML = blocks.map(b => b.html).join("");
+  }
+
   function render() {
     renderKpis();
     const pane = $("tab-outsourcing");
     if (!pane || !pane.classList.contains("active")) return;
-    if (activeSubtab === "out-subtab-queue") renderQueue(); else renderHistory();
+    fillVendorFilters();
+    if (activeSubtab === "out-subtab-queue") renderQueue();
+    else if (activeSubtab === "out-subtab-vendor") renderVendors();
+    else renderHistory();
   }
 
   // ===================== ACTIONS =====================
@@ -309,10 +388,14 @@
   const closeModal = id => $(id).classList.remove("active");
   let current = null;
 
-  function openSend(kp) {
+  let editing = false;
+  function openSend(kp, edit) {
     const job = allJobs().find(j => j.kpNumber === kp); if (!job) return;
     current = job;
+    editing = !!edit;
     const o = outOf(job);
+    $("out-send-title").textContent = editing ? "Edit Vendor Details" : "Send to Vendor";
+    $("out-send-submit").textContent = editing ? "Save Changes" : "Send to Vendor";
     $("out-send-kp").textContent = kpLabel(job);
     $("out-send-from").textContent = o.fromStage ? `(from ${o.fromStage})` : "";
     const vendors = [...new Set(allTrips().map(t => t.vendor).concat(outJobs().map(j => outOf(j).vendor)).filter(Boolean))].sort();
@@ -320,8 +403,12 @@
     $("out-vendor").value = ""; $("out-work").value = ""; $("out-dc").value = ""; $("out-remarks").value = "";
     $("out-qty").value = job.quantity || ""; $("out-qty").max = job.quantity || "";
     $("out-sent").value = today();
-    const exp = new Date(); exp.setDate(exp.getDate() + 7);
-    $("out-expected").value = `${exp.getFullYear()}-${String(exp.getMonth() + 1).padStart(2, "0")}-${String(exp.getDate()).padStart(2, "0")}`;
+    $("out-expected").value = "";
+    if (editing) {   // pre-fill what was entered when it was sent
+      $("out-vendor").value = o.vendor || ""; $("out-work").value = o.work || ""; $("out-dc").value = o.dcNo || "";
+      $("out-qty").value = o.qtySent || job.quantity || ""; $("out-sent").value = String(o.sentAt || today()).slice(0, 10);
+      $("out-expected").value = o.expectedReturn ? String(o.expectedReturn).slice(0, 10) : ""; $("out-remarks").value = o.remarks || "";
+    }
     openModal("out-modal-send");
   }
 
@@ -329,18 +416,25 @@
     e.preventDefault();
     const job = current; if (!job) return;
     const v = id => String($(id).value || "").trim();
-    if (!v("out-vendor") || !v("out-work") || !v("out-dc") || !v("out-qty") || !v("out-sent") || !v("out-expected")) { alert("Please fill in all required fields."); return; }
-    if (v("out-expected") < v("out-sent")) { alert("Expected return date cannot be before the sent date."); return; }
-    const o = Object.assign({}, outOf(job), {
-      status: "At Vendor", vendor: v("out-vendor"), work: v("out-work"), dcNo: v("out-dc"), qtySent: Number(v("out-qty")),
-      sentAt: v("out-sent"), expectedReturn: v("out-expected"), remarks: v("out-remarks"), sentBy: me(), sentRecordedAt: new Date().toISOString(),
-      qtyReceived: null, receivedAt: null, returnRemarks: "", returnedTo: ""
-    });
+    if (!v("out-vendor") || !v("out-work") || !v("out-dc") || !v("out-qty") || !v("out-sent")) { alert("Please fill in all required fields."); return; }
+    if (v("out-expected") && v("out-expected") < v("out-sent")) { alert("Expected return date cannot be before the sent date."); return; }
+    const prev = outOf(job);
+    const o = editing
+      ? Object.assign({}, prev, { vendor: v("out-vendor"), work: v("out-work"), dcNo: v("out-dc"), qtySent: Number(v("out-qty")),
+          sentAt: v("out-sent"), expectedReturn: v("out-expected"), remarks: v("out-remarks"), editedBy: me(), editedAt: new Date().toISOString() })
+      : Object.assign({}, prev, {
+          status: "At Vendor", vendor: v("out-vendor"), work: v("out-work"), dcNo: v("out-dc"), qtySent: Number(v("out-qty")),
+          sentAt: v("out-sent"), expectedReturn: v("out-expected"), remarks: v("out-remarks"), sentBy: me(), sentRecordedAt: new Date().toISOString(),
+          qtyReceived: null, receivedAt: null, returnRemarks: "", returnedTo: ""
+        });
+    delete o._local;
     job.outsourcing = Object.assign({ _local: true }, o);
     job.status = "In Progress";
     closeModal("out-modal-send");
     render();
-    audit(job.kpNumber, `Sent to vendor ${o.vendor} (${o.work}), DC ${o.dcNo}, ${o.qtySent} pcs, expected back ${o.expectedReturn}`);
+    audit(job.kpNumber, editing
+      ? `Updated vendor details: ${o.vendor}, DC ${o.dcNo}, expected back ${o.expectedReturn || "not set"}`
+      : `Sent to vendor ${o.vendor} (${o.work}), DC ${o.dcNo}, ${o.qtySent} pcs, expected back ${o.expectedReturn || "not set"}`);
     try { await saveJob(job, { outsourcing: o, currentStatus: "In Progress" }); delete job.outsourcing._local; }
     catch (err) { alert("Could not save: " + (err && err.message ? err.message : err)); }
   }
@@ -469,11 +563,14 @@
     }));
     $("out-filter-text").addEventListener("input", renderQueue);
     $("out-filter-state").addEventListener("change", renderQueue);
-    $("out-filter-clear").addEventListener("click", () => { $("out-filter-text").value = ""; $("out-filter-state").value = ""; renderQueue(); });
+    $("out-filter-vendor").addEventListener("change", renderQueue);
+    $("out-filter-clear").addEventListener("click", () => { $("out-filter-text").value = ""; $("out-filter-state").value = ""; $("out-filter-vendor").value = ""; renderQueue(); });
     $("out-hist-text").addEventListener("input", renderHistory);
+    $("out-hist-vendor").addEventListener("change", renderHistory);
     $("out-queue-cards").addEventListener("click", e => {
-      const s = e.target.closest("[data-out-send]"), r = e.target.closest("[data-out-receive]");
-      if (s) openSend(s.getAttribute("data-out-send"));
+      const s = e.target.closest("[data-out-send]"), r = e.target.closest("[data-out-receive]"), ed = e.target.closest("[data-out-edit]");
+      if (ed) { openSend(ed.getAttribute("data-out-edit"), true); return; }
+      if (s) openSend(s.getAttribute("data-out-send"), false);
       if (r) openReceive(r.getAttribute("data-out-receive"));
     });
     $("out-send-form").addEventListener("submit", submitSend);
