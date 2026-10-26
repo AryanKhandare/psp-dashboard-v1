@@ -48,7 +48,7 @@ const FIR_HEADERS = [
 const S = {};
 SUMMARY_HEADERS.forEach((h, i) => { S[h] = i + 1; });
 
-const STAGES = ["Inspection", "Machining", "Masking", "Blasting", "Spraying", "Sealing", "Grinding", "Polishing", "Final Inspection", "Dispatch", "Outsourcing", "Dispatched"];
+const STAGES = ["Inspection", "Machining", "Masking", "Blasting", "Spraying", "Sealing", "Grinding", "Polishing", "Final Inspection", "Dispatch", "Outsourcing", "Quarantine", "Dispatched"];
 
 function doGet() {
   return json_({ ok: true, service: "PSP MES stage sync + PIR" });
