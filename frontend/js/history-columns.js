@@ -14,7 +14,7 @@
 (function () {
   if (!window.PSP) { console.error("[PSP] history-columns: psp-common.js must load first."); return; }
   const { $, esc, allJobs } = window.PSP;
-  const MODULE_VERSION = 2;
+  const MODULE_VERSION = 3;
 
   // tbody id → where to add columns. "after" = index of the existing column the new ones follow.
   const TABLES = [
@@ -22,6 +22,7 @@
     { tbody: "grinding-history-table-body",   key: "grinding",  add: ["operator", "completed"], after: 3 },
     { tbody: "machining-history-table-body",  key: "machining", add: ["completed"], after: 6 },
     { tbody: "sealing-history-table-body",    key: "sealing",   add: ["completed"], after: 5 },
+    { tbody: "blasting-history-table-body",   key: "blasting",  add: ["completed"], after: 5 },
     { tbody: "polishing-mod-history-body",    key: "polishing", add: ["completed"], after: 5 }
   ];
   const HEAD = { operator: "Operator", completed: "Completed On" };
