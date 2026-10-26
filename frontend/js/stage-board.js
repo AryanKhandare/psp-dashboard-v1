@@ -9,7 +9,7 @@
 (function () {
   if (!window.PSP) { console.error("[PSP] stage-board: psp-common.js must load first."); return; }
   const { $, esc, opts, allJobs, user, isReadOnly, fmt, kpLabel, qtyLabel, stageKeyOf } = window.PSP;
-  const MODULE_VERSION = 8;
+  const MODULE_VERSION = 9;
 
   let boardDragging = false; // pause board redraws while a card is being dragged
 
@@ -27,7 +27,8 @@
     { stage: "Polishing",  tab: "polishing",  cards: "cards-ready",            count: "count-ready" },
     { stage: "Final Inspection", tab: "final-inspection", cards: "cards-final-stage", count: "count-final-stage", extra: { after: "cards-ready", color: "#0ea5e9" } },
     { stage: "Dispatch",   tab: "dispatch",   cards: "cards-dispatch-stage",   count: "count-dispatch-stage", extra: { after: "cards-final-stage", color: "#22c55e" } },
-    { stage: "Outsourcing", tab: "outsourcing", cards: "cards-outsourcing-stage", count: "count-outsourcing-stage", extra: { after: "cards-dispatch-stage", color: "#a855f7" } }
+    { stage: "Outsourcing", tab: "outsourcing", cards: "cards-outsourcing-stage", count: "count-outsourcing-stage", extra: { after: "cards-dispatch-stage", color: "#a855f7" } },
+    { stage: "Quarantine", tab: "quarantine", cards: "cards-quarantine-stage", count: "count-quarantine-stage", extra: { after: "cards-outsourcing-stage", color: "#b91c1c" } }
   ];
 
   function setupStageBoard() {
@@ -148,6 +149,7 @@
     "Polishing":        { hash: "polishing",        sub: '#tab-polishing [data-subtab="polishing-mod-queue"]',     filter: "polishing-mod-filter-kp", box: "polishing-mod-queue-cards" },
     "Final Inspection": { hash: "final-inspection", sub: null,                                                     filter: "final-filter-kp",     box: "final-inspection-queue-cards" },
     "Dispatch":         { hash: "dispatch",         sub: '[data-dsp-sub="dispatch-sub-queue"]',                    filter: null,                  box: "dispatch-queue-cards" },
+    "Quarantine":       { hash: "quarantine",       sub: '[data-qtn-subtab="qtn-subtab-queue"]',                  filter: "qtn-filter-text",     box: "qtn-queue-cards" },
     "Outsourcing":      { hash: "outsourcing",      sub: '[data-out-subtab="out-subtab-queue"]',                   filter: "out-filter-text",     box: "out-queue-cards" }
   };
 
