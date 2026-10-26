@@ -1445,6 +1445,7 @@ function renderUserRows(users) {
       { val: "Polishing", label: "Polishing" },
       { val: "Inspection", label: "Inspection" },
       { val: "Machining", label: "Machining" },
+      { val: "Blasting", label: "Blasting" },
       { val: "Sealing", label: "Sealing" },
       { val: "All", label: "All Departments" }
     ];
@@ -2592,6 +2593,7 @@ function renderDmdDashboard() {
           { val: "Polishing", label: "Polishing" },
           { val: "Inspection", label: "Inspection" },
           { val: "Machining", label: "Machining" },
+          { val: "Blasting", label: "Blasting" },
           { val: "Sealing", label: "Sealing" },
           { val: "All", label: "All Departments" }
         ];
@@ -2665,6 +2667,7 @@ function openCrudModal(entity, action) {
             <option value="Machining">Machining</option>
             <option value="Masking">Masking</option>
             <option value="Spraying">Spraying</option>
+            <option value="Blasting">Blasting</option>
             <option value="Sealing">Sealing</option>
             <option value="Grinding">Grinding</option>
             <option value="Polishing">Polishing</option>
@@ -2850,6 +2853,7 @@ window.loadCrudJobDetails = function(kp) {
           <option value="Machining" ${job.currentDepartment === 'Machining' ? 'selected' : ''}>Machining</option>
           <option value="Masking" ${job.currentDepartment === 'Masking' ? 'selected' : ''}>Masking</option>
           <option value="Spraying" ${job.currentDepartment === 'Spraying' ? 'selected' : ''}>Spraying</option>
+          <option value=\"Blasting\" ${job.currentDepartment === 'Blasting' ? 'selected' : ''}>Blasting</option>
           <option value="Sealing" ${job.currentDepartment === 'Sealing' ? 'selected' : ''}>Sealing</option>
           <option value="Grinding" ${job.currentDepartment === 'Grinding' ? 'selected' : ''}>Grinding</option>
           <option value="Polishing" ${job.currentDepartment === 'Polishing' ? 'selected' : ''}>Polishing</option>
