@@ -14,12 +14,12 @@
 (function () {
   if (!window.PSP) { console.error("[PSP] outsourcing: psp-common.js must load first."); return; }
   const { $, esc, opts, allJobs, user, isReadOnly, kpLabel, qtyLabel } = window.PSP;
-  const MODULE_VERSION = 3;
+  const MODULE_VERSION = 4;
 
   const STAGE = "Outsourcing";
   // Inspectors (Inspection-department operators) who may also use the Outsourcing tab, by login name
   const OUTSOURCING_INSPECTORS = ["MF", "VG", "SJ", "Laxmi", "JN"];
-  const RETURN_STAGES = ["Inspection", "Machining", "Masking", "Spraying", "Sealing", "Grinding", "Polishing", "Final Inspection", "Dispatch"];
+  const RETURN_STAGES = ["Inspection", "Machining", "Masking", "Blasting", "Spraying", "Sealing", "Grinding", "Polishing", "Final Inspection", "Dispatch"];
   const WORK_SUGGESTIONS = ["Machining", "Grinding", "Heat Treatment", "Plating", "Coating", "Welding", "Balancing", "Polishing", "Testing"];
   let activeSubtab = "out-subtab-queue";
 
