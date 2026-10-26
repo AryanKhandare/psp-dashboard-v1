@@ -15,7 +15,7 @@
 (function () {
   if (!window.PSP) { console.error("[PSP] pir-form: psp-common.js must load first."); return; }
   const { $, esc, opts, allJobs, user } = window.PSP;
-  const MODULE_VERSION = 5;
+  const MODULE_VERSION = 6;
 
   // ===================== CONFIG =====================
   // The MES Stage Sync Apps Script (it also handles PIRs: PIR_Reports tab + photos in Drive).
@@ -27,7 +27,7 @@
   const PART_TYPES = ["Cylindrical", "Rectangle"];
   const STATUSES = ["OK", "Not OK - Reported to Team Leader"];
   const PROCESSES = ["HVOF", "HAVF", "Flame Spray", "Arc Spray", "Plasma", "Rokide Gun Spray", "Arco Process", "Blank PIR"];
-  const NEXT_STAGES = ["Masking", "Machining", "Spraying", "Grinding", "Polishing", "Outsourcing", "Blank PIR/Quarantine"];
+  const NEXT_STAGES = ["Masking", "Blasting", "Machining", "Spraying", "Grinding", "Polishing", "Outsourcing", "Blank PIR/Quarantine"];
   const QUARANTINE = "Blank PIR/Quarantine";
   const FROM_STAGE = "Inspection";
   const MAX_PHOTOS = 10;
