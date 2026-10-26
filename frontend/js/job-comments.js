@@ -12,7 +12,7 @@
 (function () {
   if (!window.PSP) { console.error("[PSP] job-comments: psp-common.js must load first."); return; }
   const { $, esc, allJobs, user, kpLabel } = window.PSP;
-  const MODULE_VERSION = 2;
+  const MODULE_VERSION = 3;
   const MODERATORS = ["super_admin", "production_admin"];
 
   // ---------- data: comments of every job that has any (live from Firebase) ----------
@@ -46,7 +46,7 @@
   // ---------- which job is a card? ----------
   const STAGE_OF_TAB = { "tab-machining": "Machining", "tab-masking": "Masking", "tab-blasting": "Blasting", "tab-spraying": "Spraying", "tab-sealing": "Sealing",
     "tab-grinding": "Grinding", "tab-polishing": "Polishing", "tab-final-inspection": "Final Inspection", "tab-dispatch": "Dispatch",
-    "tab-outsourcing": "Outsourcing" };
+    "tab-outsourcing": "Outsourcing", "tab-quarantine": "Quarantine" };
   const CARD_SEL = "[data-board-kp], .stage-kanban-card, .active-card, .kanban-card, .job-queue-card";
   function jobFromCard(card) {
     if (!card) return null;
