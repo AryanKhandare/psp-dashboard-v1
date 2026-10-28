@@ -15,7 +15,7 @@
 (function () {
   if (!window.PSP) { console.error("[PSP] fir-form: psp-common.js must load first."); return; }
   const { $, esc, opts, allJobs, user } = window.PSP;
-  const MODULE_VERSION = 11;
+  const MODULE_VERSION = 12;
 
   // ===================== CONFIG =====================
   const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzMXoqOSbxHnedhNpf_8XFAJ1UCLHHnwtDPqx_05gjU3rcb9U1mmlRfd0ma5ulwO3DV/exec";
@@ -238,6 +238,11 @@
         const doc = snap.docs.find(d => d.data().isDeleted !== true);
         if (doc && doc.data().currentStage === "Dispatch") {
           await doc.ref.update({ "dispatch.clearanceHold": { active: true, since, by }, lastUpdated: firebase.firestore.FieldValue.serverTimestamp() });
+          // tell the Q2P sheet (tab Customer_Clearance + MES_Stage_Log) so the job stays out of the dispatch sheet
+          try {
+            const j = allJobs().find(x => x.kpNumber === kp) || Object.assign({ kpNumber: kp }, doc.data());
+            if (window.PSPClearanceSheet) window.PSPClearanceSheet.send([window.PSPClearanceSheet.item(j, "HOLD", { since, by })]);
+          } catch (e) {}
           try { if (typeof createAuditLog === "function") createAuditLog((user() || {}).email || by, kp, "Put on HOLD for customer clearance in Dispatch"); } catch (e) {}
           if (typeof renderAll === "function") renderAll();
           return;
