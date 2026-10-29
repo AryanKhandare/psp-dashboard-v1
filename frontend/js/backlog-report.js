@@ -3,11 +3,15 @@
  *
  * Sidebar "BKL · Backlog Report": department cards, open-job table with days in stage and days left,
  * department dropdown, filters, and Excel (.xlsx) export via SheetJS (CSV fallback).
+ *
+ * "⟳ Sync All Jobs to Sheet" (Super Admin): copies every job from Firebase into the Q2P backend sheets
+ * (PIR_Reports, FIR_Reports, Dispatch_Reports, MES_Stage_Summary, MES_Stage_Log) through the MES Stage Sync
+ * Apps Script (request type "BACKFILL"). Rows already in the sheets are skipped, so it can be clicked any time.
  */
 (function () {
   if (!window.PSP) { console.error("[PSP] backlog-report: psp-common.js must load first."); return; }
   const { $, esc, opts, allJobs, user, isReadOnly, fmt, kpLabel, qtyLabel, stageKeyOf } = window.PSP;
-  const MODULE_VERSION = 7;
+  const MODULE_VERSION = 8;
 
   // ===================== BACKLOG REPORT (all departments) =====================
   const BACKLOG_STAGES = ["Inspection", "Machining", "Masking", "Blasting", "Spraying", "Sealing", "Grinding", "Polishing", "Final Inspection", "Dispatch", "Outsourcing", "Quarantine"];
@@ -46,6 +50,7 @@
             <option value="">All Departments</option>${opts(BACKLOG_STAGES)}</select>
           <button type="button" class="btn btn-secondary btn-sm" id="btn-backlog-print" style="height:36px;">🖨️ Print</button>
           <button type="button" class="btn btn-success btn-sm" id="btn-backlog-export" style="height:36px; font-weight:700;">⬇️ Export Excel – All Departments</button>
+          <button type="button" class="btn btn-primary btn-sm" id="btn-backlog-sync" style="height:36px; font-weight:700;" title="Copy every job (PIR, FIR, Dispatch, stage history) into the Q2P backend sheets. Rows already there are skipped.">⟳ Sync All Jobs to Sheet</button>
         </div>
       </div>
       <div id="backlog-cards" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(170px, 1fr)); gap:12px; margin-bottom:16px;"></div>
@@ -92,6 +97,7 @@
     });
     $("btn-backlog-export").addEventListener("click", exportBacklogExcel);
     $("btn-backlog-print").addEventListener("click", () => window.print());
+    $("btn-backlog-sync").addEventListener("click", syncAllJobsToSheet);
   }
 
   function parseDateSafe(v) {
@@ -346,6 +352,107 @@
     a.href = URL.createObjectURL(blob);
     a.download = `PSP-backlog-${backlogFilter.dept ? backlogFilter.dept.replace(/\s+/g, "-") + "-" : ""}${new Date().toISOString().slice(0, 10)}.csv`;
     document.body.appendChild(a); a.click(); a.remove();
+  }
+
+  // ===================== SYNC ALL JOBS TO THE BACKEND SHEET (backfill) =====================
+  const SYNC_URL = "https://script.google.com/macros/s/AKfycbzMXoqOSbxHnedhNpf_8XFAJ1UCLHHnwtDPqx_05gjU3rcb9U1mmlRfd0ma5ulwO3DV/exec";
+  const SYNC_TOKEN = "psp-mes-54f01c5b50486721db971093";
+  const SYNC_STAGE_KEYS = [["inspection", "Inspection"], ["machining", "Machining"], ["masking", "Masking"], ["blasting", "Blasting"], ["spraying", "Spraying"],
+    ["sealing", "Sealing"], ["grinding", "Grinding"], ["polishing", "Polishing"], ["finalInspection", "Final Inspection"], ["dispatch", "Dispatch"],
+    ["outsourcing", "Outsourcing"], ["quarantine", "Quarantine"]];
+  const SYNC_STATUS_MAP = { "No Masking Required": "Bypassed", "At Vendor": "In Progress", "Returned": "Completed", "In Quarantine": "In Progress", "Released": "Completed" };
+  let syncing = false;
+
+  async function syncAllJobsToSheet() {
+    const u = user();
+    if (!u || u.role !== "super_admin") { alert("Only Super Admin can sync all jobs."); return; }
+    if (syncing) return;
+    if (!confirm("Copy ALL jobs from the MES into the Q2P backend sheets?\n\nPIR_Reports, FIR_Reports, Dispatch_Reports, MES_Stage_Summary, MES_Stage_Log.\nRows already in the sheets are skipped (no duplicates).\n\nThis takes 1–3 minutes. Keep this page open.")) return;
+    const btn = $("btn-backlog-sync");
+    const label = btn.textContent;
+    const setBtn = t => { btn.textContent = t; };
+    syncing = true; btn.disabled = true;
+    const toIso = v => { if (!v) return ""; const d = (v && typeof v.toDate === "function") ? v.toDate() : new Date(v); return isNaN(d.getTime()) ? "" : d.toISOString(); };
+    try {
+      // 1) every job, straight from Firebase (it keeps the PIR / FIR / Dispatch forms and stage times)
+      setBtn("Reading jobs…");
+      const snap = await firebase.firestore().collection("jobs").get({ source: "server" });
+      const docs = snap.docs.map(d => d.data()).filter(d => d.isDeleted !== true && d.kpNumber);
+      const pir = [], fir = [], dsp = [], stageItems = [];
+      const reports = (arr, one) => (Array.isArray(arr) && arr.length ? arr : (one ? [one] : []));
+      docs.forEach(d => {
+        const jc = d.jcNo || (window.kpToJcMap || {})[String(d.kpNumber).toUpperCase()] || "";
+        const base = { kpNo: d.kpNumber, jcNo: jc, partName: d.partName || "", customer: d.customer || "" };
+        reports(d.pirReports, d.pirReport).forEach(r => pir.push(Object.assign({}, base, r)));
+        reports(d.firReports, d.firReport).forEach(r => fir.push(Object.assign({}, base, r)));
+        reports(d.dispatchReports, d.dispatchReport).forEach(r => dsp.push(Object.assign({}, base, r)));
+        const assigned = d.stageAssignedAt || {};
+        const stages = [];
+        SYNC_STAGE_KEYS.forEach(([key, name]) => {
+          const st = d[key];
+          if (!st || typeof st !== "object") return;
+          const isCurrent = d.currentStage === name;
+          let status = SYNC_STATUS_MAP[st.status] || st.status || "";
+          if (!isCurrent && (!status || status === "Pending")) return;      // stage not used by this job
+          if (key === "dispatch" && d.currentStage === "Dispatched") status = "Completed";
+          const holds = Array.isArray(st.holdHistory) ? st.holdHistory : [];
+          const lastHold = holds.length ? (holds[holds.length - 1].reason || holds[holds.length - 1].holdReason || "") : (st.holdReason || "");
+          stages.push({
+            stage: name, status, operator: st.operatorName || st.vendor || st.by || "", shift: st.shift || "",
+            enteredAt: toIso(assigned[key.toLowerCase()] || st.queueEntryTime || st.enteredAt || st.at),
+            startedAt: toIso(st.startTime || st.sentAt), completedAt: toIso(st.endTime || st.receivedAt || st.releasedAt),
+            activeTimeMs: Number(st.activeTimeMs || st.durationMs || 0), holdCount: holds.length, lastHoldReason: lastHold,
+            nextStage: st.nextStage || st.returnedTo || st.releasedTo || ""
+          });
+        });
+        if (d.currentStage === "Dispatched") stages.push({ stage: "Dispatched", status: "Completed",
+          enteredAt: toIso(assigned.dispatched || (d.dispatch || {}).endTime), completedAt: toIso((d.dispatch || {}).endTime) });
+        if (stages.length) stageItems.push({ kpNo: d.kpNumber, jcNo: jc, partName: d.partName || "", customer: d.customer || "",
+          quantity: d.quantity || "", processType: d.processType || "", stages });
+      });
+      const uniq = (list, key) => { const seen = new Set(); return list.filter(x => { const k = key(x); if (seen.has(k)) return false; seen.add(k); return true; }); };
+
+      // 2) send in batches; the sheet answers what it added
+      async function send(kind, items, size) {
+        const tot = { added: 0, already: 0, summaryRows: 0, logRows: 0 };
+        for (let i = 0; i < items.length; i += size) {
+          const chunk = items.slice(i, i + size);
+          setBtn(`Syncing ${kind} ${Math.min(i + size, items.length)}/${items.length}…`);
+          let out = null, lastErr = null;
+          for (let attempt = 1; attempt <= 3 && !out; attempt++) {
+            try {
+              const res = await fetch(SYNC_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
+                body: JSON.stringify({ type: "BACKFILL", kind, token: SYNC_TOKEN, items: chunk }) });
+              const text = await res.text();
+              let o; try { o = JSON.parse(text); } catch (e) { throw new Error("the MES Stage Sync web app did not answer with data – check its deployment (Who has access: Anyone, New version)"); }
+              if (o.ok === false) throw new Error(o.error || "sheet refused");
+              out = o;
+            } catch (e) { lastErr = e; if (attempt < 3) await new Promise(r => setTimeout(r, 4000)); }
+          }
+          if (!out) throw new Error(`${kind} ${i + 1}–${i + chunk.length}: ${lastErr ? lastErr.message : "no answer"}`);
+          tot.added += out.added || 0; tot.already += out.alreadyThere || 0;
+          tot.summaryRows += out.newSummaryRows || 0; tot.logRows += out.newLogRows || 0;
+        }
+        return tot;
+      }
+      const r1 = await send("PIR", uniq(pir, x => x.kpNo + "|" + x.pirNo + "|" + x.submittedAt), 100);
+      const r2 = await send("FIR", uniq(fir, x => x.kpNo + "|" + x.firNo + "|" + x.submittedAt), 100);
+      const r3 = await send("DISPATCH", uniq(dsp, x => x.kpNo + "|" + x.dispatchQty + "|" + x.submittedAt), 100);
+      const r4 = await send("STAGES", stageItems, 25);
+      const msg = `SYNC DONE – ${docs.length} jobs\n\n` +
+        `PIR_Reports: ${r1.added} added, ${r1.already} already there\n` +
+        `FIR_Reports: ${r2.added} added, ${r2.already} already there\n` +
+        `Dispatch_Reports: ${r3.added} added, ${r3.already} already there\n` +
+        `MES_Stage_Summary: ${r4.summaryRows} new rows (gaps filled in existing rows)\n` +
+        `MES_Stage_Log: ${r4.logRows} rows added (marked "backfill")`;
+      console.log("[Backlog] " + msg.replace(/\n+/g, " | "));
+      alert(msg);
+    } catch (e) {
+      console.warn("[Backlog] Sync to sheet failed:", e);
+      alert("Sync stopped:\n" + (e && e.message ? e.message : e) + "\n\nNothing is lost – fix the cause and click the button again (rows already copied are skipped).");
+    } finally {
+      syncing = false; btn.disabled = false; btn.textContent = label;
+    }
   }
 
   // ===================== HOOKS =====================
