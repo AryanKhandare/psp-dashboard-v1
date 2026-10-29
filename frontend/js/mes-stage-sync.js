@@ -470,29 +470,44 @@ if (typeof window !== "undefined" && typeof document !== "undefined") {
       flushTimer = setTimeout(flush, delay);
     }
 
+    // Last result, visible in the console: window.PSPStageLog.status()
+    const lastResult = { at: null, ok: null, message: "nothing sent yet", pending: 0 };
+
     async function flush() {
       if (!MES_STAGE_SYNC_URL || flushing) return;
       const queue = readQueue();
+      lastResult.pending = queue.length;
       if (!queue.length) return;
       flushing = true;
       const batch = queue.slice(0, 50);
       try {
-        // "no-cors" + text/plain = simple request to Apps Script, no CORS preflight
-        await fetch(MES_STAGE_SYNC_URL, {
+        // text/plain = simple request (no CORS preflight); the reply is read so a refused batch is kept and retried
+        const res = await fetch(MES_STAGE_SYNC_URL, {
           method: "POST",
-          mode: "no-cors",
           headers: { "Content-Type": "text/plain;charset=utf-8" },
           body: JSON.stringify({ token: SHARED_TOKEN, events: batch })
         });
+        const text = await res.text();
+        let out = null;
+        try { out = JSON.parse(text); } catch (e) { out = null; }
+        if (!out) {
+          throw new Error("The MES Stage Sync web app did not answer with data (HTTP " + res.status + "). " +
+            "Check the Apps Script deployment: Manage deployments → Edit → Who has access: Anyone → New version → Deploy.");
+        }
+        if (out.ok === false) throw new Error("The sheet refused the events: " + (out.error || "unknown error"));
         writeQueue(readQueue().slice(batch.length));
+        Object.assign(lastResult, { at: new Date().toISOString(), ok: true, message: `sent ${batch.length} event(s), sheet wrote ${out.written}`, pending: readQueue().length });
+        console.log(`[MES Stage Sync] ${lastResult.message}.`);
         if (readQueue().length) scheduleFlush(1000);
       } catch (err) {
-        console.warn("[MES Stage Sync] Send failed, will retry:", err.message);
+        Object.assign(lastResult, { at: new Date().toISOString(), ok: false, message: err.message, pending: readQueue().length });
+        console.warn("[MES Stage Sync] NOT saved to the sheet – will retry in 1 minute. Reason:", err.message);
         scheduleFlush(60000);
       } finally {
         flushing = false;
       }
     }
+    window.PSPStageLog = { status: () => Object.assign({}, lastResult, { pending: readQueue().length }), sendNow: () => flush() };
 
     // ---- Wrap sendBackendPost: log only after Firebase saved successfully ----
     const originalSend = window.sendBackendPost;
