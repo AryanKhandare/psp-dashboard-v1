@@ -7,7 +7,7 @@
 (function () {
   if (!window.PSP) { console.error("[PSP] ui-tweaks: psp-common.js must load first."); return; }
   const { $, esc, opts, allJobs, user, isReadOnly, fmt, kpLabel, qtyLabel, stageKeyOf } = window.PSP;
-  const MODULE_VERSION = 9;
+  const MODULE_VERSION = 10;
 
   const STAGE = "Machining";
 
@@ -292,6 +292,60 @@
     };
   }
 
+  // Newest first in Spraying and Grinding: queue cards by arrival in the stage, history rows by completion time.
+  // (The stages themselves list jobs in Firebase's internal order, so a new job could appear anywhere.)
+  const NEWEST_FIRST = [
+    { box: "spraying-queue-cards",        key: "spraying", stage: "Spraying", kind: "queue" },
+    { box: "grinding-queue-cards",        key: "grinding", stage: "Grinding", kind: "queue" },
+    { box: "spraying-history-table-body", key: "spraying", stage: "Spraying", kind: "history" },
+    { box: "grinding-history-table-body", key: "grinding", stage: "Grinding", kind: "history" }
+  ];
+  const tsOf = v => { if (!v) return 0; const d = (v && typeof v.toDate === "function") ? v.toDate() : new Date(v); const t = d.getTime(); return isNaN(t) ? 0 : t; };
+  const cleanKpOf = kp => (typeof getCleanKpNumber === "function" ? getCleanKpNumber(kp) : kp);
+  const jcOf = j => (typeof getJobJcNo === "function" ? getJobJcNo(j) : j.jcNo) || "";
+  function labelFromEl(el) {
+    const src = el.tagName === "TR" ? (el.querySelector("td") || el) : (el.querySelector(".job-card-header") || el);
+    const m = src.textContent.replace(/\s+/g, " ").match(/KP-[A-Z0-9]+(?:-[A-Z0-9]+)*(?:\s*\([^)]*\))?/i);
+    return m ? m[0].trim().toUpperCase() : "";
+  }
+  function sortNewestFirst(cfg) {
+    const box = $(cfg.box);
+    if (!box) return;
+    const items = [...box.children].filter(el => cfg.kind === "queue" ? el.classList.contains("stage-kanban-card") : el.tagName === "TR" && el.children.length > 1);
+    if (items.length < 2) return;
+    const pool = allJobs().filter(j => cfg.kind === "queue" ? j.currentDepartment === cfg.stage : (j[cfg.key] && j[cfg.key].status === "Completed"));
+    const used = new Set();
+    const timeOf = el => {
+      const label = labelFromEl(el), kpOnly = label.replace(/\s*\(.*$/, "");
+      const lbl = j => (cleanKpOf(j.kpNumber) + (jcOf(j) ? ` (${jcOf(j)})` : "")).toUpperCase();
+      const job = pool.find(j => !used.has(j) && lbl(j) === label) || pool.find(j => !used.has(j) && String(cleanKpOf(j.kpNumber)).toUpperCase() === kpOnly);
+      if (!job) return 0;
+      used.add(job);
+      const sd = job[cfg.key] || {};
+      return cfg.kind === "queue"
+        ? (tsOf((job.stageAssignedAt || {})[cfg.key]) || tsOf(sd.queueEntryTime) || tsOf(sd.startTime))
+        : (tsOf(sd.endTime) || tsOf((job.stageAssignedAt || {})[cfg.key]));
+    };
+    const withTime = items.map((el, i) => ({ el, i, t: timeOf(el) }));
+    const sorted = withTime.slice().sort((a, b) => (b.t - a.t) || (a.i - b.i));
+    if (sorted.every((x, i) => x.el === items[i])) return;      // already in order: no DOM change
+    const anchor = items[items.length - 1].nextSibling;
+    sorted.forEach(x => box.insertBefore(x.el, anchor));
+  }
+  function installNewestFirst() {
+    NEWEST_FIRST.forEach(cfg => {
+      const box = $(cfg.box);
+      if (!box || box.dataset.pspNewest) return;
+      box.dataset.pspNewest = "1";
+      let queued = false;
+      new MutationObserver(() => {
+        if (queued) return;
+        queued = true;
+        setTimeout(() => { queued = false; try { sortNewestFirst(cfg); } catch (e) {} }, 30);
+      }).observe(box, { childList: true });
+    });
+  }
+
   function limitSprayingLockToOperators() {
     let raw = !!window.sprayingJobActive;
     const isSprayingOperator = () => {
@@ -321,6 +375,7 @@
     fixMobileHeight();
     addNextStageCancel();
     fixSplitJobJc();
+    installNewestFirst();
     installRenderHook();
     console.log("[PSP] ui-tweaks v" + MODULE_VERSION + " loaded.");
   } catch (err) {
