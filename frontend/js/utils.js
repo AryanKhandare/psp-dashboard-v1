@@ -931,6 +931,11 @@ const ROLE_PERMISSIONS = {
     'tab-overview', 'tab-inspection', 'tab-masking', 'tab-spraying', 
     'tab-grinding', 'tab-polishing', 'tab-final-inspection', 'tab-dispatch', 'tab-data-management', 'tab-reports'
   ],
+  production_manager: [
+    'tab-overview', 'tab-inspection', 'tab-masking', 'tab-spraying', 
+    'tab-grinding', 'tab-polishing', 'tab-final-inspection', 'tab-dispatch', 'tab-reports',
+    'tab-machining', 'tab-sealing', 'tab-outsourcing'
+  ],
   it_team: [
     'tab-overview', 'tab-data-management', 'tab-reports'
   ],
@@ -966,6 +971,7 @@ function isTabAuthorized(tabId) {
   const role = currentUser.role;
   if (role === 'super_admin') return ROLE_PERMISSIONS.super_admin.includes(tabId);
   if (role === 'production_admin') return ROLE_PERMISSIONS.production_admin.includes(tabId);
+  if (role === 'production_manager') return (ROLE_PERMISSIONS.production_manager || []).includes(tabId);
   if (role === 'it_team') return ROLE_PERMISSIONS.it_team.includes(tabId);
   if (role === 'hr_admin') return ROLE_PERMISSIONS.hr_admin.includes(tabId);
   if (role === 'quality_admin') return ROLE_PERMISSIONS.quality_admin.includes(tabId);
@@ -1020,6 +1026,7 @@ function getDefaultTab() {
     if (dept === 'Inspection') return 'tab-inspection';
   }
   if (role === 'quality_admin') return 'tab-inspection';
+  if (role === 'production_manager') return 'tab-overview';
   return 'tab-overview';
 }
 

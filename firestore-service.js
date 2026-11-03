@@ -432,7 +432,10 @@ async function seedFirestoreDatabaseIfEmpty() {
       { name: "Vikrant", email: "vikrant.grinding@plasmaspray.co.in", role: "operator", department: "Grinding", pin: "700002" },
 
       // Polishing Operators
-      { name: "Operator", email: "polishing.operator@plasmaspray.co.in", role: "operator", department: "Polishing", pin: "800001" }
+      { name: "Operator", email: "polishing.operator@plasmaspray.co.in", role: "operator", department: "Polishing", pin: "800001" },
+
+      // Management / Production Manager
+      { name: "ambarish", email: "ambarish@plasmaspray.co.in", role: "production_manager", department: "All", pin: "987654" }
     ];
 
     for (const op of opsToSeed) {
