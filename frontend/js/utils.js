@@ -686,7 +686,8 @@ async function autoSyncJobsFromSpreadsheet(records) {
         updates.customer = record.customer;
         fieldsChanged = true;
       }
-      if (record.jcNo && record.jcNo !== existingJob.jcNo) {
+      // Copy a real JC from the sheet; never replace a real JC with a placeholder ("Pending" …) from stale data
+      if (isRealJcNo(record.jcNo) && record.jcNo !== existingJob.jcNo) {
         existingJob.jcNo = record.jcNo;
         updates.jcNo = record.jcNo;
         fieldsChanged = true;
@@ -1198,13 +1199,22 @@ async function initApp() {
   }
 })();
 
+// "Pending", "-", "NA", "TBD" … are placeholders written in the sheet before the JC is issued – never a real JC
+function isRealJcNo(v) {
+  const t = String(v == null ? "" : v).trim();
+  if (!t) return false;
+  return !/^(pending|pend|na|n\/a|nil|none|tbd|tba|-+|0|jc pending|not issued|awaited)$/i.test(t);
+}
+window.isRealJcNo = isRealJcNo;
+
 function getJobJcNo(job) {
   if (!job) return "";
-  if (job.jcNo) return job.jcNo;
+  if (isRealJcNo(job.jcNo)) return job.jcNo;
   const kp = job.kpNumber || job.kpNo || "";
   if (!kp) return "";
   const cleanKp = String(kp).trim().toUpperCase();
-  return window.kpToJcMap && window.kpToJcMap[cleanKp] ? window.kpToJcMap[cleanKp] : "";
+  const fromSheet = window.kpToJcMap && window.kpToJcMap[cleanKp];
+  return isRealJcNo(fromSheet) ? fromSheet : "";
 }
 window.getJobJcNo = getJobJcNo;
 
