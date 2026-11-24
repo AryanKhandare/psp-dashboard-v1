@@ -358,13 +358,27 @@
         <div class="inspection-workflow-container" style="display:flex; flex-direction:column; gap:20px;">
           <!-- Horizontal form to create a new job card -->
           <div class="panel" style="margin-bottom: 0;">
-            <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center;">
-              <h3>NEW JOB INTAKE REGISTRATION</h3>
-              <button type="button" id="btn-refresh-inspection" class="btn btn-secondary btn-xs" style="display: flex; align-items: center; gap: 4px; cursor: pointer; height: 24px; padding: 2px 8px;">
-                <span>🔄</span> REFRESH
-              </button>
+            <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <h3 style="margin: 0;">NEW JOB INTAKE REGISTRATION</h3>
+                <span id="inspection-sheet-status-badge" style="display: none; font-size: 10px; padding: 2px 8px; border-radius: 12px; font-weight: 700; letter-spacing: 0.5px;"></span>
+              </div>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <!-- Super Admin Only: Delink / Link Google Sheet Button -->
+                <button type="button" id="btn-sheet-toggle-inspection" class="btn btn-warning btn-xs" style="display: none; align-items: center; gap: 5px; cursor: pointer; height: 24px; padding: 2px 10px; font-weight: 700;" title="Delink or link the Google Sheet for Inspection stage (Super Admin only)">
+                  <span id="btn-sheet-toggle-inspection-icon">🔗</span>
+                  <span id="btn-sheet-toggle-inspection-text">DELINK SHEET</span>
+                </button>
+                <button type="button" id="btn-refresh-inspection" class="btn btn-secondary btn-xs" style="display: flex; align-items: center; gap: 4px; cursor: pointer; height: 24px; padding: 2px 8px;">
+                  <span>🔄</span> REFRESH
+                </button>
+              </div>
             </div>
             <div class="panel-body">
+              <!-- Delinked Notification Banner -->
+              <div id="inspection-sheet-delinked-banner" style="display: none; margin-bottom: 15px; padding: 10px 14px; border-radius: 6px; background: rgba(245, 158, 11, 0.12); border: 1px solid #f59e0b; color: #fbbf24; font-size: 12px; font-weight: 600; text-align: center; align-items: center; justify-content: center; gap: 8px;">
+                <span>⚠️</span> Google Sheet is currently <strong>DELINKED</strong> by Super Admin. Incoming entries to Inspection stage are paused.
+              </div>
               <div id="inspection-loading-msg" style="display: none; margin-bottom: 15px; padding: 10px; border-radius: 4px; background: rgba(59, 130, 246, 0.15); border: 1px solid #3b82f6; color: #60a5fa; font-weight: bold; font-size: 12px; text-transform: uppercase; text-align: center; align-items: center; justify-content: center; gap: 8px;">
                 <span class="spinner-icon" style="margin-right: 6px;">🔄</span> Loading Inspection Master Data...
               </div>
@@ -1698,6 +1712,30 @@
           <h2>Security & User Access Management</h2>
           <p class="section-desc">Provision accounts, configure corporate authorization levels, and suspend or activate access profiles.</p>
         </div>
+
+        <!-- Super Admin Integration Control: Google Sheet Delink / Link -->
+        <div class="panel" id="super-admin-sheet-integration-panel" style="margin-bottom: 20px; border-left: 4px solid #3b82f6;">
+          <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+            <div>
+              <h3 style="margin: 0; display: flex; align-items: center; gap: 8px;">
+                <span>📊</span> GOOGLE SHEET INTEGRATION (INSPECTION STAGE)
+              </h3>
+              <p style="margin: 4px 0 0; font-size: 12px; color: var(--text-muted, #94a3b8);">
+                Controls whether the external Google Sheet feeds incoming component entries into the Inspection stage.
+              </p>
+            </div>
+            <div style="display: flex; align-items: center; gap: 12px;">
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <span style="font-size: 12px; color: var(--text-muted, #94a3b8);">Current Status:</span>
+                <span id="super-admin-sheet-status-pill" style="font-size: 11px; padding: 3px 10px; border-radius: 12px; font-weight: 700; background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid #10b981;">LINKED (LIVE)</span>
+              </div>
+              <button type="button" id="btn-sheet-toggle-admin" class="btn btn-warning btn-sm" style="display: flex; align-items: center; gap: 6px; font-weight: 700; height: 32px; padding: 0 14px;">
+                <span id="btn-sheet-toggle-admin-icon">🔗</span>
+                <span id="btn-sheet-toggle-admin-text">Delink Google Sheet</span>
+              </button>
+            </div>
+          </div>
+        </div>
         
         <div class="split-layout">
           <!-- Create User Form -->
@@ -2734,6 +2772,7 @@
   <script src="js/spraying.js"></script>
   <script src="js/grinding.js?v=2"></script>
   <script src="js/dashboard.js?v=4"></script>
+  <script src="js/inspection-sheet-link.js"></script>
   <!-- PSP add-ons (load in this order, after dashboard.js / mes-stage-sync.js, before app.js) -->
   <script src="js/psp-common.js?v=2"></script>
   <script src="js/machining.js?v=20"></script>

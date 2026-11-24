@@ -605,6 +605,10 @@ function parseRowsWithWorker(rows, op) {
 
 async function autoSyncJobsFromSpreadsheet(records) {
   if (isMockMode()) return;
+  if (typeof isInspectionSheetDelinked === "function" && isInspectionSheetDelinked()) {
+    console.log("[Auto-Sync] Skipping auto-sync because Google Sheet is delinked from Inspection stage.");
+    return;
+  }
   if (!isMockMode() && !_initialFirestoreLoadComplete) {
     console.log("[Auto-Sync] Skipping auto-sync on startup because initial Firestore snapshot is not yet loaded.");
     return;
@@ -1169,9 +1173,12 @@ async function initApp() {
     startAutoRefresh();
 
     // Live update: Poll Google Sheet for new KP numbers periodically (configured to 10 minutes)
-    // Guard prevents overlapping requests via _inspectionFetchInProgress lock and skips if user is editing
+    // Guard prevents overlapping requests via _inspectionFetchInProgress lock and skips if user is editing or sheet is delinked
     setInterval(async () => {
       try {
+        if (typeof isInspectionSheetDelinked === "function" && isInspectionSheetDelinked()) {
+          return;
+        }
         await loadInspectionKPs(false, true);
         console.log("[Inspection] Auto-refresh check complete.");
       } catch (err) {

@@ -932,6 +932,10 @@ function applySidebarPermissions() {
     }
   }
 
+  if (typeof updateSheetLinkUI === 'function') {
+    updateSheetLinkUI();
+  }
+
 
 }
 
@@ -1909,6 +1913,14 @@ function setupEventListeners() {
   const btnRefreshInspection = document.getElementById("btn-refresh-inspection");
   if (btnRefreshInspection) {
     btnRefreshInspection.addEventListener("click", async () => {
+      if (typeof isInspectionSheetDelinked === 'function' && isInspectionSheetDelinked()) {
+        if (typeof showToast === 'function') {
+          showToast("Sheet Delinked", "Google Sheet is currently delinked from Inspection stage. Re-link it to fetch incoming data.", "warning");
+        } else {
+          alert("Google Sheet is currently delinked from Inspection stage. Re-link it to fetch incoming data.");
+        }
+        return;
+      }
       const originalText = btnRefreshInspection.innerHTML;
       btnRefreshInspection.disabled = true;
       btnRefreshInspection.innerHTML = '<span>🔄</span> LOADING...';

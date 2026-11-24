@@ -125,6 +125,20 @@ function updateInspectionDropdowns() {
     const currentPart = partSelect.value;
     const currentCust = custSelect.value;
     const currentQty = qtySelect.value;
+
+    // Check if Google Sheet is delinked from Inspection stage
+    if (typeof isInspectionSheetDelinked === "function" && isInspectionSheetDelinked()) {
+      kpSelect.innerHTML = '<option value="">-- Google Sheet Delinked --</option>';
+      partSelect.innerHTML = '<option value="">-- Google Sheet Delinked --</option>';
+      custSelect.innerHTML = '<option value="">-- Google Sheet Delinked --</option>';
+      qtySelect.innerHTML = '<option value="">-- Google Sheet Delinked --</option>';
+      kpSelect.disabled = true;
+      partSelect.disabled = true;
+      custSelect.disabled = true;
+      qtySelect.disabled = true;
+      activeInspectionRecord = null;
+      return;
+    }
     
     // Exclude delivered records from all operator dropdowns (case-insensitive)
     // Pre-inspection dropdown shows ONLY jobs still pending pre-inspection:
@@ -264,6 +278,14 @@ function updateInspectionDropdowns() {
 async function loadInspectionKPs(forceRefresh = false, isAutoRefresh = false) {
   if (isMockMode()) {
     console.log("[Inspection] Skipped Google Sheets fetch in Mock Mode.");
+    return;
+  }
+
+  // ─── Delink check: skip if Google Sheet is delinked from Inspection stage ───
+  if (typeof isInspectionSheetDelinked === "function" && isInspectionSheetDelinked()) {
+    console.log("[Inspection] Google Sheet is currently DELINKED from Inspection stage — skipping fetch.");
+    hideInspectionLoading();
+    updateInspectionDropdowns();
     return;
   }
 
